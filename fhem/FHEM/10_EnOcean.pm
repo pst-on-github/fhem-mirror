@@ -7731,10 +7731,12 @@ sub EnOcean_Parse($$) {
           push @event, "3:anglePos:" . AttrVal($name, "angleMin", -90);
         }
         push @event, "3:endPosition:open_ack";
+      	readingsSingleUpdate($hash, ".positionStart", 0, 0); #PST: Update from acknowledge msg
         $msg = "open_ack";
       } elsif ($db[0] == 0x50) {
         # closed
         push @event, "3:position:100";
+        readingsSingleUpdate($hash, ".positionStart", 100, 0);	#PST: Update from acknowledge msg
         push @event, "3:anglePos:" . AttrVal($name, "angleMax", 90);
         push @event, "3:endPosition:closed";
         $msg = "closed";
