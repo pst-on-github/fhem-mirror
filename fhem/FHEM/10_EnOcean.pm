@@ -484,6 +484,7 @@ my %EnO_models = (
   "Eltako_FAE14" => {attr => {manufID => "00D"}},
   "Eltako_FAH60" => {attr => {manufID => "00D"}},
   "Eltako_FBH55SB" => {attr => {manufID => "00D"}},
+  "Eltako_FBH63" => {attr => {manufID => "00D"}},
   "Eltako_FBH65SB" => {attr => {manufID => "00D"}},
   "Eltako_FBHF65SB" => {attr => {manufID => "00D"}},
   "Eltako_FHK14" => {attr => {manufID => "00D"}},
