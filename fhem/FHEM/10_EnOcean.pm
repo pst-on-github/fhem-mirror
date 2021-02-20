@@ -4348,16 +4348,16 @@ sub EnOcean_Set($@) {
 
         } else {
           # check actual shutter position
-	  my $actualState = ReadingsVal($name, "state", undef);
-	  if (defined $actualState) {
-	    if ($actualState eq "open") {
-	      $position = 0;
-	      $anglePos = 0;
-	    } elsif ($actualState eq "closed") {
-	      $position = 100;
-	      $anglePos = $angleMax;
-	    }
-	  }
+	        my $actualState = ReadingsVal($name, "state", undef);
+	        if (defined $actualState) {
+            if ($actualState eq "open" || $actualState eq "open_ack") { #PST: Added or "open_ack"
+	            $position = 0;
+	            $anglePos = 0;
+	          } elsif ($actualState eq "closed") {
+	            $position = 100;
+	            $anglePos = $angleMax;
+	          }
+	        }
           $anglePosStart = $anglePos;
           $positionStart = $position;
           readingsSingleUpdate($hash, ".anglePosStart", $anglePosStart, 0);
