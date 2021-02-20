@@ -4578,9 +4578,11 @@ sub EnOcean_Set($@) {
               }
               if ($position == 0) {
                 readingsSingleUpdate($hash, "endPosition", "open", 1);
+                $shutTime = $shutTimeCloses;	#PST: Use *Closes for open
                 $cmd = "open";
               } elsif ($position == 100) {
                 readingsSingleUpdate($hash, "endPosition", "closed", 1);
+                $shutTime = $shutTimeCloses;	#PST: Use *Closes for closes
                 $cmd = "closed";
               } else {
                 readingsSingleUpdate($hash, "endPosition", "not_reached", 1);
