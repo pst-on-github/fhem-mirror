@@ -9771,11 +9771,11 @@ sub EnOcean_Parse($$) {
         # Eltako sensor
         my $voltage = sprintf "%0.1f", $db[3] * 6.58 / 255;
         my $energyStorage = "unknown";
-        if ($db[3] <= 0x58) {
+        if ($db[3] <= 0x58) { # PST <= 2.27 V
           $energyStorage = "empty";
           $battery = "low";
         }
-        elsif ($db[3] <= 0xDC) {
+        elsif ($db[3] <= 0xDC) {  # PST <= 5.67 V
           $energyStorage = "charged";
           $battery = "ok";
         }
