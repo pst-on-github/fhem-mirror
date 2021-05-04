@@ -125,7 +125,7 @@ sub fhem($@);
 sub fhemTimeGm($$$$$$);
 sub fhemTimeLocal($$$$$$);
 sub fhemTzOffset($);
-sub getAllAttr($;$);
+sub getAllAttr($;$$);
 sub getAllGets($;$);
 sub getAllSets($;$);
 sub getPawList($);
@@ -281,8 +281,8 @@ $selectTimestamp = gettimeofday();
 $cvsid = '$Id$';
 
 my $AttrList = "alias comment:textField-long eventMap:textField-long ".
-               "group room suppressReading userReadings:textField-long ".
-               "verbose:0,1,2,3,4,5";
+               "group room suppressReading userattr ".
+               "userReadings:textField-long verbose:0,1,2,3,4,5 ";
 
 my $currcfgfile="";             # current config/include file
 my $currlogfile;                # logfile, without wildcards
@@ -330,7 +330,7 @@ my @globalAttrList = qw(
   blockingCallMax
   commandref:modular,full
   configfile
-  disableFeatures:multiple-strict,attrTemplate,securityCheck
+  disableFeatures:multiple-strict,attrTemplate,securityCheck,saveuuid
   dnsHostsFile
   dnsServer
   dupTimeout
@@ -388,6 +388,12 @@ my @attrList = qw(
   timestamp-on-change-reading
 );
 $readingFnAttributes = join(" ", @attrList);
+my %framework_attrList = map { s/:.*//; $_ => 1 } @attrList;
+map { $framework_attrList{$_} = 1 } qw(
+  ignore
+  disable
+  disabledForIntervals
+);
 
 my %ra = (
   "suppressReading"            => { s=>"\n" },
@@ -1719,6 +1725,7 @@ CommandSave($$)
 
   my %devByNr;
   map { $devByNr{$defs{$_}{NR}} = $_ } keys %defs;
+  my $dumpUuid = (AttrVal("global", "disableFeatures", "") !~ m/\bsaveuuid\b/i);
 
   for(my $i = 0; $i < $devcount; $i++) {
 
@@ -1753,7 +1760,7 @@ CommandSave($$)
       next;
     }
 
-    my @arr = GetDefAndAttr($d, 1);
+    my @arr = GetDefAndAttr($d, $dumpUuid);
     print $fh join("\n", @arr)."\n" if(@arr);
 
   }
@@ -2049,26 +2056,34 @@ LoadModule($;$)
 
 #####################################
 sub
+cmd_parseOpts($$$)
+{
+  my ($def, $optRegexp, $res) = @_;
+  while($def) {
+    last if($def !~ m/^\s*($optRegexp)\s+/);
+    my $o = $1;
+    $def =~ s/^\s*$o\s+//;
+    $o =~ s/^-//;
+    $res->{$o} = 1;
+  }
+  return $def;
+}
+
+sub
 CommandDefine($$)
 {
   my ($cl, $def) = @_;
-  my @a = split("[ \t]+", $def, 3);
-  my ($ignoreErr, $temporary);
 
-  # used by RSS in fhem.cfg.demo, with no GD installed
-  if($a[0] && $a[0] eq "-ignoreErr") {
-    $def =~ s/\s*-ignoreErr\s*//;
-    @a = split("[ \t][ \t]*", $def, 3);
-    $ignoreErr = 1;
-  }
-  if($a[0] && $a[0] eq "-temporary") { # Forum #39610, 46640
-    $def =~ s/\s*-temporary\s*//;
-    @a = split("[ \t][ \t]*", $def, 3);
-    $temporary = 1;
-  }
+  # ignoreErr ist used by RSS in fhem.cfg.demo, with no GD installed
+  # temporary #39610 #46640
+  # silent    #57691
+  my %opt;
+  my $optRegexp = '-ignoreErr|-temporary|-silent';
+  $def = cmd_parseOpts($def, $optRegexp, \%opt);
+  my @a = split("[ \t]+", $def, 3);
 
   my $name = $a[0];
-  return "Usage: define <name> <type> <type dependent arguments>"
+  return "Usage: define [$optRegexp] <name> <type> <type dependent arguments>"
                 if(int(@a) < 2);
   return "$name already defined, delete it first" if(defined($defs{$name}));
   return "Invalid characters in name (not A-Za-z0-9._): $name"
@@ -2084,7 +2099,7 @@ CommandDefine($$)
     }
   }
 
-  my $newm = LoadModule($m, $ignoreErr);
+  my $newm = LoadModule($m, $opt{ignoreErr});
   return "Cannot load module $m" if($newm eq "UNDEFINED");
   $m = $newm;
 
@@ -2102,7 +2117,7 @@ CommandDefine($$)
         if($currcfgfile ne AttrVal("global", "configfile", "") &&
           !configDBUsed());
   $hash{CL}    = $cl;
-  $hash{TEMPORARY} = 1 if($temporary);
+  $hash{TEMPORARY} = 1 if($opt{temporary});
 
   # If the device wants to issue initialization gets/sets, then it needs to be
   # in the global hash.
@@ -2111,7 +2126,7 @@ CommandDefine($$)
   my $ret = CallFn($name, "DefFn", \%hash, 
                 $modules{$m}->{parseParams} ? parseParams($def) : $def);
   if($ret) {
-    Log 1, "define $def: $ret" if(!$ignoreErr);
+    Log 1, "define $def: $ret" if(!$opt{ignoreErr});
     delete $defs{$name};                            # Veto
     delete $attr{$name};
 
@@ -2125,12 +2140,12 @@ CommandDefine($$)
                 $modules{$m}{NotifyOrderPrefix} : "50-") . $name;
     }
     %ntfyHash = ();
-    if(!$temporary && $init_done) {
-      addStructChange("define", $name, $def);
+    if(!$opt{temporary} && $init_done) {
+      addStructChange("define", $name, $def) if(!$opt{silent});
       DoTrigger("global", "DEFINED $name", 1);
     }
   }
-  return ($ret && $ignoreErr ?
+  return ($ret && $opt{ignoreErr} ?
         "Cannot define $name, remove -ignoreErr for details" : $ret);
 }
 
@@ -2139,6 +2154,9 @@ sub
 CommandModify($$)
 {
   my ($cl, $def) = @_;
+
+  my %opt;
+  $def = cmd_parseOpts($def, '-silent', \%opt);
   my @a = split("[ \t]+", $def, 2);
 
   return "Usage: modify <name> <type dependent arguments>"
@@ -2160,7 +2178,7 @@ CommandModify($$)
   if($ret) {
     $hash->{DEF} = $hash->{OLDDEF};
   } else {
-    addStructChange("modify", $a[0], $def);
+    addStructChange("modify", $a[0], $def) if(!$opt{silent});
     DoTrigger("global", "MODIFIED $a[0]", 1) if($init_done);
   }
 
@@ -2173,19 +2191,21 @@ sub
 CommandDefMod($$)
 {
   my ($cl, $def) = @_;
+  my %opt;
+  my $optRegexp = '-ignoreErr|-temporary|-silent';
+  $def = cmd_parseOpts($def, $optRegexp, \%opt);
   my @a = split("[ \t]+", $def, 3);
-  return "Usage: defmod <name> <type> <type dependent arguments>"
+
+  return "Usage: defmod [$optRegexp] <name> <type> <type dependent arguments>"
                 if(int(@a) < 2);
-  if($a[0] eq "-temporary" && $defs{$a[1]}) {
-    @a = split("[ \t]+", $def, 4);
-    shift @a;
-  }
   if($defs{$a[0]}) {
     $def = $a[2] ? "$a[0] $a[2]" : $a[0];
     return "defmod $a[0]: Cannot change the TYPE of an existing definition"
         if($a[1] ne $defs{$a[0]}{TYPE});
+    $def = "-".join(" -", keys %opt)." ".$def if(%opt);
     return CommandModify($cl, $def);
   } else {
+    $def = "-".join(" -", keys %opt)." ".$def if(%opt);
     return CommandDefine($cl, $def);
   }
 }
@@ -2198,38 +2218,37 @@ AssignIoPort($;$)
   my ($hash, $proposed) = @_;
   my $ht = $hash->{TYPE};
   my $hn = $hash->{NAME};
-  my $hasIODevAttr = ($ht &&
-                      $modules{$ht}{AttrList} &&
-                      $modules{$ht}{AttrList} =~ m/IODev/);
 
-  $proposed = $attr{$hn}{IODev}
-        if(!$proposed && $attr{$hn} && $attr{$hn}{IODev});
+  $proposed = AttrVal($hn,     "IODev", undef) if(!$proposed);
+  $proposed = ReadingsVal($hn, "IODev", undef) if(!$proposed);
   
   if($proposed && $defs{$proposed} && IsDisabled($proposed) != 1) {
     $hash->{IODev} = $defs{$proposed};
-    $attr{$hn}{IODev} = $proposed if($hasIODevAttr);
-    delete($defs{$proposed}{".clientArray"});
-    return;
-  }
-  # Set the I/O device, search for the last compatible one.
-  for my $p (sort { $defs{$b}{NR} <=> $defs{$a}{NR} } keys %defs) {
 
-    next if(IsDisabled($p) == 1);
-    next if($defs{$p}{TEMPORARY}); # e.g. server clients
-    my $cl = $defs{$p}{Clients};
-    $cl = $modules{$defs{$p}{TYPE}}{Clients} if(!$cl);
+  } else {
+    # Set the I/O device, search for the last compatible one.
+    for my $p (sort { $defs{$b}{NR} <=> $defs{$a}{NR} } keys %defs) {
 
-    if($cl && $defs{$p}{NAME} ne $hn) {      # e.g. RFR
-      my @fnd = grep { $hash->{TYPE} =~ m/^$_$/; } split(":", $cl);
-      if(@fnd) {
-        $hash->{IODev} = $defs{$p};
-        delete($defs{$p}{".clientArray"}); # Force a recompute
-        last;
+      next if(IsDisabled($p) == 1);
+      next if($defs{$p}{TEMPORARY}); # e.g. server clients
+      my $cl = $defs{$p}{Clients};
+      $cl = $modules{$defs{$p}{TYPE}}{Clients} if(!$cl);
+
+      if($cl && $defs{$p}{NAME} ne $hn) {      # e.g. RFR
+        my @fnd = grep { $hash->{TYPE} =~ m/^$_$/; } split(":", $cl);
+        if(@fnd) {
+          $hash->{IODev} = $defs{$p};
+          $proposed = $p;
+          last;
+        }
       }
     }
   }
-  if($hash->{IODev}) {
-    $attr{$hn}{IODev} = $hash->{IODev}{NAME} if($hasIODevAttr);
+
+  if($hash->{IODev} && $proposed) {
+    setReadingsVal($hash, "IODev", $proposed, TimeNow()); # 120603
+    delete($defs{$proposed}{".clientArray"});
+    return;
 
   } else {
     if($init_done) {
@@ -2735,28 +2754,39 @@ CommandRename($$)
 
 #####################################
 sub
-getAllAttr($;$)
+getAllAttr($;$$)
 {
-  my ($d, $cl) = @_;
+  my ($d, $cl, $typeHash) = @_;
   return "" if(!$defs{$d});
+  my $list = "";
 
-  my $list = $AttrList; # Global values
+  my $add = sub($$)
+  {
+    my ($v,$type) = @_;
+    return if(!defined($v));
+    $list .= " " if($list);
+    $list .= $v;
+    map { s/:.*//; 
+          $typeHash->{$_} = $framework_attrList{$_} ? "framework" : $type }
+        split(" ",$v) if($typeHash);
+  };
+
+  &$add($AttrList, "framework");
   if($defs{$d}{".AttrList"}) {
-    $list .= " " . $defs{$d}{".AttrList"};
-  } elsif($modules{$defs{$d}{TYPE}}{AttrList}) {
-    $list .= " " . $modules{$defs{$d}{TYPE}}{AttrList};
+    &$add($defs{$d}{".AttrList"}, "Module");
+  } else {
+    &$add($modules{$defs{$d}{TYPE}}{AttrList}, "Module");
   }
 
-  my $nl2space = sub($)
+  my $nl2space = sub($$)
   {
-    my $v = $_[0];
+    my ($v,$type) = @_;
     return if(!defined($v));
     $v =~ s/\n/ /g;
-    $list .= " $v";
+    &$add($v, $type);
   };
-  $nl2space->($attr{global}{userattr});
-  $nl2space->($attr{$d}{userattr}) if($attr{$d});
-  $list .= " userattr";
+  $nl2space->($attr{global}{userattr}, "global userattr");
+  $nl2space->($attr{$d}{userattr}, "device userattr") if($attr{$d});
   return $list;
 }
 
@@ -2916,17 +2946,41 @@ GlobalAttr($$$$)
 
 #####################################
 sub
+fhem_setIoDev($$)
+{
+  my ($hash, $val) = @_;
+
+  if(!$val || !defined($defs{$val})) {
+    if(!$init_done) {
+      $hash->{IODevMissing} = 1;
+      $hash->{IODevName} = $val;
+    }
+    return "unknown IODev $val specified";
+  }
+
+  $hash->{IODev} = $defs{$val};
+  delete($defs{$val}{".clientArray"}); # Force a recompute
+  if(!$init_done) {
+    delete($hash->{IODevMissing});
+    delete($hash->{IODevName});
+  }
+
+  return undef;
+}
+
+sub
 CommandAttr($$)
 {
   my ($cl, $param) = @_;
   my ($ret, $append, $remove, @a);
+  my %opt;
+  my $optRegexp = '-a|-r|-silent';
+  $param = cmd_parseOpts($param, $optRegexp, \%opt);
 
-  $append = ($param =~ s/^-a //);
-  $remove = ($param =~ s/^-r //);
   @a = split(" ", $param, 3) if($param);
 
-  return "Usage: attr [-a|-r] <name> <attrname> [<attrvalue>]\n$namedef"
-           if(@a < 2 || ($append && $remove));
+  return "Usage: attr [$optRegexp] <name> <attrname> [<attrvalue>]\n$namedef"
+           if(@a < 2 || ($opt{a} && $opt{r}));
   my $a1 = $a[1];
   return "$a[0]: bad attribute name '$a1' (allowed chars: A-Za-z/\\d_\\.-)"
            if($featurelevel > 5.9 && !goodReadingName($a1) && $a1 ne "?");
@@ -2968,11 +3022,11 @@ CommandAttr($$)
       }
     }
 
-    if($append && $attr{$sdev} && $attr{$sdev}{$attrName}) {
+    if($opt{a} && $attr{$sdev} && $attr{$sdev}{$attrName}) {
       $attrVal = $attr{$sdev}{$attrName} . 
                         ($attrVal =~ m/^,/ ? $attrVal : " $attrVal");
     }
-    if($remove && $attr{$sdev} && $attr{$sdev}{$attrName}) {
+    if($opt{r} && $attr{$sdev} && $attr{$sdev}{$attrName}) {
       my $v = $attr{$sdev}{$attrName};
       $v =~ s/\b$attrVal\b//;
       $attrVal = $v;
@@ -3068,27 +3122,22 @@ CommandAttr($$)
     $attr{$sdev}{$attrName} = $attrVal;
 
     if($attrName eq "IODev") {
-      if(!$attrVal || !defined($defs{$attrVal})) {
-        if($init_done) {
-          push @rets,"$sdev: unknown IODev $attrVal specified";
-        } else {
-          $hash->{IODevMissing} = 1;
-          $hash->{IODevName} = $attrVal;
-        }
+      my $ret = fhem_setIoDev($hash, $attrVal);
+      if($ret) {
+        push @rets, $ret if($init_done);
         next;
+      } else {
+        setReadingsVal($hash, "IODev", $attrVal, TimeNow());
       }
-
-      my $ioname = $attrVal;
-      $hash->{IODev} = $defs{$ioname};
-      delete($defs{$ioname}{".clientArray"}); # Force a recompute
     }
+
     if($attrName eq "stateFormat" && $init_done) {
       my $err = perlSyntaxCheck($attrVal, ("%name"=>""));
       return $err if($err);
       evalStateFormat($hash);
     }
     addStructChange("attr", $sdev, "$sdev $attrName $attrVal")
-        if(!defined($oVal) || $oVal ne $attrVal);
+        if(!$opt{silent} && (!defined($oVal) || $oVal ne $attrVal));
     DoTrigger("global", "ATTR $sdev $attrName $attrVal", 1) if($init_done);
 
   }
@@ -3155,6 +3204,14 @@ CommandSetstate($$)
          $d->{READINGS}{$sname}{TIME} lt $tim) {
         $d->{READINGS}{$sname}{VAL} = $sval;
         $d->{READINGS}{$sname}{TIME} = $tim;
+      }
+
+      if($sname eq "IODev") {
+        my $ret = fhem_setIoDev($d, $sval);
+        if($ret) {
+          push @rets, $ret if($init_done);
+          next;
+        }
       }
 
     } else {
@@ -5129,7 +5186,8 @@ utf8ToLatin1($)
 
 # replaces some common control chars by escape sequences
 # in order to make logs more readable
-sub escapeLogLine($) {
+sub
+escapeLogLine($) {
   my ($s)= @_;
   
   # http://perldoc.perl.org/perlrebackslash.html

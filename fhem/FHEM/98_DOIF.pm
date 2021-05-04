@@ -77,6 +77,7 @@ sub DOIF_delAll($)
   delete ($hash->{perlblock});
   delete ($hash->{var});
   delete ($hash->{accu});
+  delete ($hash->{collect});
   delete ($hash->{Regex});
   delete ($hash->{defs});
 
@@ -436,6 +437,7 @@ sub parse_tpl
   
   $wcmd =~ s/\$TD\{(.*)?\}\{(.*)?\}.*(\".*\")/for my \$rowi ($1) \{for my \$coli ($2) \{\$hash->\{$table\}\{td\}\{\$rowi\}\{\$coli\} = $3\}\}/g;
   $wcmd =~ s/\$TABLE/\$hash->{$table}{tablestyle}/;
+  $wcmd =~ s/<\s*\n/\."<\/tbody><\/table>\$hash->{$table}{header}"\n/g;
 
   $wcmd =~ s/\$VAR/\$hash->{var}/g;
   $wcmd =~ s/\$_(\w+)/\$hash->\{var\}\{$1\}/g;
@@ -665,11 +667,12 @@ sub DOIF_RegisterEvalAll
   return undef if (!defined $hash->{$table}{table});
   #$ret =~ s/class\=\'block\'/$hash->{$table}{table}/ if($hash->{$table}{table});
   if ($table eq "uiTable") {
-    $ret .= "\n<table uitabid='DOIF-$d' class=' block wide ".$table."doif doif-$d ' style='".($hash->{$table}{tablestyle} ? $hash->{$table}{tablestyle} : "")."'".
+    $ret.= "\n<table uitabid='DOIF-$d' class=' block wide ".$table."doif doif-$d ' style='".($hash->{$table}{tablestyle} ? $hash->{$table}{tablestyle} : "")."'".
       " doifnostate='".($hash->{$table}{shownostate} ? $hash->{$table}{shownostate} : "")."'".
       " doifnodevline='".($hash->{$table}{shownodeviceline} ? $hash->{$table}{shownodeviceline} : "")."'".
       " doifattrfirst='".($hash->{$table}{attributesfirst} ? $hash->{$table}{attributesfirst} : "")."'".
-      ">"; 
+      ">";
+    $hash->{$table}{header}= "\n<table uitabid='DOIF-$d' class=' block wide ".$table."doif doif-$d ' style='border-top:none;".($hash->{$table}{tablestyle} ? $hash->{$table}{tablestyle} : "")."'>";
     #$ret .= "\n<table uitabid='DOIF-$d' class=' ".$table."doif doif-$d ' style='".($hash->{$table}{tablestyle} ? $hash->{$table}{tablestyle} : "")."'>"; 
   } else {
    $ret .= "\n<table uitabid='DOIF-$d' class=' ".$table."doif doif-$d ' style='".($hash->{$table}{tablestyle} ? $hash->{$table}{tablestyle} : "")."'". 
@@ -728,13 +731,13 @@ sub DOIF_RegisterEvalAll
 sub DOIF_tablePopUp {
   my ($pn,$d,$icon,$table) = @_;
   $table = $table ? $table : "uiTable";
+  my ($ic,$itext,$iclass)=split(",",$icon);
   if ($defs{$d} && AttrVal($d,$table,"")) {
-    my $ret = "<a href=\"#\" onclick=\"doifTablePopUp('$defs{$d}','$d','$pn','$table')\">".FW_makeImage($icon)."</a>";
+    my $ret = "<a href=\"#\" onclick=\"doifTablePopUp('$defs{$d}','$d','$pn','$table')\">".FW_makeImage($ic,$itext,$iclass)."</a>";
   } else {
     return "no device $d or attribut $table";
   }
 }
-
 sub DOIF_summaryFn ($$$$) {
   my ($FW_wname, $d, $room, $pageHash) = @_; # pageHash is set for summaryFn.
   my $hash = $defs{$d};
@@ -1277,6 +1280,12 @@ sub ReadingValDoIf
             return (($a[-1]-$a[0])/$a[0]);
           }
         }
+      } elsif ($regExp =~ /^(col)(\d*)/) {
+        my $hours=$2;
+        $hours=24 if (!defined ($hours) or !$hours);
+        $hash->{collect}{"$name $reading"}{$hours}{value}=$r;
+        $hash->{collect}{"$name $reading"}{$hours}{time}=time_str2num(ReadingsTimestamp($name, $reading, "1970-01-01 01:00:00"));
+        return (\%{$hash->{collect}{"$name $reading"}{$hours}});
       } elsif ($regExp =~ /^d(\d)?/) {
         my $round=$1;
         $r = ($r =~ /(-?\d+(\.\d+)?)/ ? $1 : 0);
@@ -1304,17 +1313,101 @@ sub accu_setValue
   
   my ($hash,$name,$reading)=@_;
   if (defined $hash->{accu}{"$name $reading"}) {
-    my @a=@{$hash->{accu}{"$name $reading"}{value}};
+    my $a=$hash->{accu}{"$name $reading"}{value};
     my $dim=$hash->{accu}{"$name $reading"}{dim};
-    shift (@a) if (@a >= $dim);
+    shift (@{$a}) if (@{$a} >= $dim);
     my $r=ReadingsVal($name,$reading,0);
     $r = ($r =~ /(-?\d+(\.\d+)?)/ ? $1 : 0);
-    push (@a,$r);
-    @{$hash->{accu}{"$name $reading"}{value}}=@a;
+    push (@{$a},$r);
   }
 }
 
+sub collect_setValue
+{
+  my ($hash,$name,$reading,$hours)=@_;
+  my $dim=60;
+  my $min_per_slot=$hours;
+  my $diff_slots=1;
+  my $maxVal;
+  my $maxValTime;
+  my $maxValSlot;
+  my $minVal;
+  my $minValTime;
+  my $minValSlot;
+  
+  my $va=$hash->{collect}{"$name $reading"}{$hours}{values};
+  my $ta=$hash->{collect}{"$name $reading"}{$hours}{times};
+  
+  my $r=ReadingsVal($name,$reading,0);
+  $r = ($r =~ /(-?\d+(\.\d+)?)/ ? $1 : 0);
+  my ($seconds, $microseconds) = gettimeofday();
+  my $slot_nr=int ($seconds/(60*$min_per_slot));
+  if (defined $hash->{collect}{"$name $reading"}{$hours}{last_slot}) {
+    $diff_slots=$slot_nr-$hash->{collect}{"$name $reading"}{$hours}{last_slot};
+    if ($diff_slots > 0) {
+     # $hash->{collect}{"$name $reading"}{$hours}{last_value}=undef;
+      if ($diff_slots >= $dim) {
+        for (my $i=@{$va}-1;$i>=0;$i--) {
+          if (defined (${$va}[$i])) {
+            $hash->{collect}{"$name $reading"}{$hours}{last_value}=${$va}[$i];
+            last;
+          }
+        }
+        @{$va}=();
+        @{$ta}=();
+      } else {  
+        my @rv=splice (@{$va},0,$diff_slots);
+        my @rt=splice (@{$ta},0,$diff_slots);
+        if (!defined (${$va}[0])) {
+          for (my $i=@rv-1;$i>=0;$i--) {
+            if (defined ($rv[$i])) {
+              $hash->{collect}{"$name $reading"}{$hours}{last_value}=$rv[$i];
+              last;
+            }
+          }
+        }
+      }
+    }
+  }
+  if ($diff_slots > 0) {
+    $hash->{collect}{"$name $reading"}{$hours}{last_slot}=$slot_nr;
+  }
+  
+  #if ($diff_slots > 0 or $r > 0 and $r > ${$va}[$dim-1] or $r < 0 and $r < ${$va}[$dim-1]
+  ${$va}[$dim-1]=$r;
+  ${$ta}[$dim-1]=$seconds;
+  
+  $hash->{collect}{"$name $reading"}{$hours}{value}=$r;
+  $hash->{collect}{"$name $reading"}{$hours}{time}=$seconds;
 
+  for (my $i=0;$i<@{$va};$i++) {
+    my $value=${$va}[$i];
+    my $time=${$ta}[$i];
+    if (defined $value and defined $time) {
+      if (!defined $maxVal or $value > $maxVal) {
+         $maxVal=$value;
+         $maxValTime=$time;
+         $maxValSlot=$i;
+         
+      }
+      if (!defined $minVal or $value < $minVal) {
+         $minVal=$value;
+         $minValTime=$time;
+         $minValSlot=$i;
+      }
+    }
+  }
+##  $hash->{collect}{"$name $reading"}{$hours}{max_value_plot}=(defined ${$va}[0] and ${$va}[0]>$maxVal) ? ${$va}[0]:$maxVal;
+##  $hash->{collect}{"$name $reading"}{$hours}{min_value_plot}=(defined ${$va}[0] and ${$va}[0]<$minVal) ? ${$va}[0]:$minVal;
+  
+  $hash->{collect}{"$name $reading"}{$hours}{max_value}=$maxVal;
+  $hash->{collect}{"$name $reading"}{$hours}{max_value_time}=$maxValTime;
+  $hash->{collect}{"$name $reading"}{$hours}{max_value_slot}=$maxValSlot;
+  
+  $hash->{collect}{"$name $reading"}{$hours}{min_value}=$minVal;
+  $hash->{collect}{"$name $reading"}{$hours}{min_value_time}=$minValTime;
+  $hash->{collect}{"$name $reading"}{$hours}{min_value_slot}=$minValSlot;
+}
 
 sub EvalAllDoIf($$)
 {
@@ -1449,9 +1542,9 @@ sub ReplaceEventDoIf($)
   return ($block,undef);
 }
 
-sub ReplaceReadingDoIf($)
+sub ReplaceReadingDoIf
 {
-  my ($element) = @_;
+  my ($hash,$element) = @_;
   my $beginning;
   my $tailBlock;
   my $err;
@@ -1500,16 +1593,25 @@ sub ReplaceReadingDoIf($)
           $output=$2;
           return ($regExp,"no round brackets in regular expression") if ($regExp !~ /.*\(.*\)/);
         } elsif ($format =~ /^((avg|med|diff|inc)(\d*))/) {
-           AddRegexpTriggerDoIf($hs,"accu","","accu",$name,$reading);
+           AddRegexpTriggerDoIf($hash,"accu","","accu",$name,$reading);
            $regExp =$1;
            my $dim=$3;
            $dim=2 if (!defined $dim or !$dim);
-           if (defined $hs->{accu}{"$name $reading"}{dim}) {
-             $hs->{accu}{"$name $reading"}{dim}=$hs->{accu}{"$name $reading"}{dim} < $dim ? $dim : $hs->{accu}{"$name $reading"}{dim};
+           if (defined $hash->{accu}{"$name $reading"}{dim}) {
+             $hash->{accu}{"$name $reading"}{dim}=$hash->{accu}{"$name $reading"}{dim} < $dim ? $dim : $hash->{accu}{"$name $reading"}{dim};
            } else {
-             $hs->{accu}{"$name $reading"}{dim}=$dim;
-             @{$hs->{accu}{"$name $reading"}{value}}=();
+             $hash->{accu}{"$name $reading"}{dim}=$dim;
+             @{$hash->{accu}{"$name $reading"}{value}}=();
            }
+        } elsif ($format =~ /^((col)(\d*))/) {
+           $regExp =$1;
+           my $hours=$3;
+           $hours=24 if (!defined $hours or !$hours);
+           delete $hash->{collect}{"$name $reading"}{$hours};
+           AddRegexpTriggerDoIf($hash,"collect","","collect",$name,$reading);
+           @{$hash->{collect}{"$name $reading"}{$hours}{values}}=();
+           @{$hash->{collect}{"$name $reading"}{$hours}{times}}=();
+           $hash->{collect}{"$name $reading"}{$hours}{hours}=$hours;
         } elsif ($format =~ /^(d[^:]*)(?::(.*))?/) {
           $regExp =$1;
           $output=$2;
@@ -1543,7 +1645,7 @@ sub ReplaceReadingDoIf($)
 sub ReplaceReadingEvalDoIf($$$)
 {
   my ($hash,$element,$eval) = @_;
-  my ($block,$err,$device,$reading,$internal)=ReplaceReadingDoIf($element);
+  my ($block,$err,$device,$reading,$internal)=ReplaceReadingDoIf($hash,$element);
   return ($block,$err) if ($err);
   if ($eval) {
    #   return ("[".$element."]","") if(!$defs{$device});
@@ -2711,6 +2813,20 @@ DOIF_Notify($$)
       accu_setValue($hash,$device,$readingregex) if (defined $readingregex);
     }
   }
+  
+  if (defined $hash->{Regex}{"collect"}{"$dev->{NAME}"}) {
+    my $device=$dev->{NAME};
+    foreach my $reading (keys %{$hash->{Regex}{"collect"}{$device}{"collect"}}) {
+      my $readingregex=CheckRegexpDoIf($hash,"collect",$dev->{NAME},"collect",$eventa,$eventas,$reading);
+      if (defined $readingregex) {
+        foreach my $hours (keys %{$hash->{collect}{"$device $readingregex"}}) {
+          collect_setValue($hash,$device,$readingregex,$hours);
+        }
+      }
+    }
+  }
+
+  
 
   if (defined CheckRegexpDoIf($hash,"cond",$dev->{NAME},"",$eventa,$eventas)) {
     $hash->{helper}{cur_cmd_nr}="Trigger  $dev->{NAME}" if (AttrVal($hash->{NAME},"selftrigger","") ne "all");
@@ -4151,6 +4267,13 @@ sub FW_makeImage {
  
 
 # Widgets
+
+ 
+sub widget { 
+  my ($value,$widget,$set)=@_;
+  $set="" if (!defined $set);
+  return ($value,"",$widget,$set)
+} 
  
  sub temp_knob {
     my ($value,$color,$set)=@_;
@@ -4292,21 +4415,350 @@ sub format_value {
     $value=$min;
   } elsif ($val  !~ /(-?\d+(\.\d+)?)/) {
     $format='%s';
-    $value=$min;
+    $value=0;
   } else {
     $format='%1.'.$dec.'f';
   }
   return($format,$value,$val);
 }
 
+sub get_color {
+  my ($value,$min,$max,$minColor,$maxColor,$func)=@_;
+  my $color;
+  if (!defined $value or $value eq "N/A" or $value < $min ) {
+    $value = $min;
+  } elsif ($value > $max) {
+    $value = $max;
+  }
+  if (ref($func) eq "CODE") {
+    $minColor=&{$func}($min);
+    $maxColor=&{$func}($max);
+    $color=&{$func}($value);
+  } elsif (ref($func) eq "ARRAY") {
+    $minColor=${$func}[1];
+    $maxColor=${$func}[-1];
+    for (my $i=0;$i<@{$func};$i+=2) {
+      if ($value <= ${$func}[$i]) {
+        $color=${$func}[$i+1];
+        last;
+      }
+    }
+  } else {
+    $minColor=120 if (!defined $minColor);
+    $maxColor=0 if (!defined $maxColor);
+    my $prop=0;
+    $prop=($value-$min)/($max-$min) if ($max-$min);
+    if ($minColor < $maxColor) {
+      $color=$prop*($maxColor-$minColor)+$minColor;
+    } else {
+      $color=(1-$prop)*($minColor-$maxColor)+$maxColor;
+    }
+  }
+  return(int($color),$minColor,$maxColor);
+}
+
+sub card
+{
+  my ($collect,$header,$icon,$min,$max,$minColor,$maxColor,$unit,$func,$decfont,$prop,$model,$lightness) = @_;
+  my $val=${$collect}{value};
+  my $a=@{$collect}{values};
+  my $last_value=${$collect}{last_value};
+  my $maxVal = ${$collect}{max_value};
+  my $maxValTime = ${$collect}{max_value_time};
+  my $maxValSlot = ${$collect}{max_value_slot};
+
+  my $minVal = ${$collect}{min_value};
+  my $minValTime = ${$collect}{min_value_time};
+  my $minValSlot = ${$collect}{min_value_slot};
+  my $hours = ${$collect}{hours};
+  my $time = ${$collect}{time};
+  my $bwidth=160;
+  my $bheight=88;
+  my $htrans=0;  
+  
+
+  
+  my $out;
+  my ($ic,$iscale,$ix,$iy,$rotate);
+
+  my ($size,$plot,$steps);
+  ($size,$plot,$steps)=split (/,/,$prop) if (defined $prop);
+  $plot = "" if (!defined $plot);
+  $steps = "" if (!defined $steps);
+  
+  my ($dec,$fontformat,$unitformat);
+  ($dec,$fontformat,$unitformat)=split (/,/,$decfont) if (defined $decfont);
+  $fontformat="" if (!defined $fontformat);
+  $unitformat="" if (!defined $unitformat);
+  
+  my ($header_txt,$header_style);
+  ($header_txt,$header_style)=split (/,/,$header) if (defined $header);
+  $header_style="" if (!defined $header_style);
+   
+  my ($format,$value);
+  my ($lr,$lir,$lmm,$lu,$ln,$li);
+  ($lr,$lir,$lmm,$lu,$ln,$li)=split (/,/,$lightness) if (defined $lightness);
+  $unit="" if (!defined $unit);
+  
+  if (defined $header) {
+    $htrans = 24;
+    $bheight += 24;
+  }
+
+
+  $min=0 if (!defined $min);
+  $max=100 if (!defined $max);
+  $dec=1 if (!defined $dec);
+  
+  ($format,$value,$val)=format_value($val,$min,$dec);
+    
+  $minVal=$value if (!defined $minVal);
+  $maxVal=$value if (!defined $maxVal);
+  
+  if (defined $last_value) {
+    if ($last_value> $maxVal) {
+      $maxVal=$last_value;
+    } elsif ($last_value <  $minVal) {
+      $minVal=$last_value;
+    }
+  }
+  ##$value=$max if($value>$max);
+  ##$value=$min if ($value<$min);
+  
+  $size=130 if (!defined $size or $size eq "");
+  
+  
+  my ($maxValColor)=get_color($maxVal,$min,$max,$minColor,$maxColor,$func);
+  my ($minValColor)=get_color($minVal,$min,$max,$minColor,$maxColor,$func); 
+  
+  if (defined ($icon)) {
+    ($ic,$iscale,$ix,$iy,$rotate)=split(",",$icon);
+    $rotate=0 if (!defined $rotate);
+    $iscale=1 if (!defined $iscale);
+    $ic="" if (!defined($ic));
+  }
+   
+  my $svg_width=int($size/100*$bwidth);
+  my $svg_height=int($size/100*$bheight);
+  
+  my $xpos;
+  my $nullColor;
+  my $nullProp;
+  my $topVal;
+  my $topOpacity;
+  my $bottomVal;
+  my $bottomOpacity;
+  my $nullOpacity;
+  my $minPlot;
+  my $maxPlot;
+  my $scaling=0;
+  
+  if ($plot ne "1" and $minVal ne $maxVal) {
+      $scaling=1;
+      $minPlot=($value < $minVal ? $value : $minVal);
+      $maxPlot=($value > $maxVal ? $value : $maxVal);
+  } else {
+    
+      my $minimum=(($value<$min and $value<$minVal) ? $value:($min<$minVal) ? $min:$minVal);
+      my $maximum=(($value>$max and $value>$maxVal) ? $value:($max>$maxVal) ? $max:$maxVal);
+
+      $minPlot=(($min < 0 and $minVal > 0) ? 0 : $minimum);
+      $maxPlot=(($max > 0 and $maxVal < 0) ? 0 : $maximum);
+  }
+  
+  my ($m,$n)=m_n($minPlot,0,$maxPlot,50);
+  my $currColor;
+  ($currColor,$minColor,$maxColor)=get_color($value,$min,$max,$minColor,$maxColor,$func);
+  
+  if ($minPlot < 0 and $maxPlot > 0) {
+    $xpos=50-int($n*10)/10;
+    $topVal=($maxVal > 0 ? $maxVal : 0);
+    $bottomVal=($minVal < 0 ? $minVal : 0);
+    ($nullColor)=get_color(0,$min,$max,$minColor,$maxColor,$func);
+    $nullProp=int ($topVal/($topVal-$bottomVal)*100)/100 if ($bottomVal<0 and $topVal>0);
+    $topOpacity=($topVal==0 ? 0 : 0.25);
+    $bottomOpacity=($bottomVal==0 ? 0: 0.25);
+    $nullOpacity=0.0;
+  } elsif ($maxPlot <= 0) {
+    $xpos=0;
+    $topVal=$maxPlot;
+    $topOpacity=0.0;
+    $bottomOpacity=0.25;
+    $bottomVal=$minVal;
+  } else {
+    $xpos=50;
+    $topVal=$maxVal;
+    $topOpacity=0.25;
+    $bottomOpacity=0.0;
+    $bottomVal=$minPlot;
+  }
+  
+  $ic="$ic\@".color($currColor,$ln) if (defined($icon) and $icon !~ /@/);
+  
+  my ($topValColor)=get_color($topVal,$min,$max,$minColor,$maxColor,$func);
+  my ($bottomValColor)=get_color($bottomVal,$min,$max,$minColor,$maxColor,$func);
+  $out.= sprintf ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 0 %d %d" width="%d" height="%d" style="width:%dpx; height:%dpx;">',$bwidth,$bheight,$svg_width,$svg_height,$svg_width,$svg_height);
+  $out.= '<defs>';
+  $out.= '<linearGradient id="gradcardback" x1="0" y1="1" x2="0" y2="0"><stop offset="0" style="stop-color:rgb(32,32,32);stop-opacity:0.9"/><stop offset="1" style="stop-color:rgb(64, 64, 64);stop-opacity:0.9"/></linearGradient>';
+  $out.= sprintf('<linearGradient id="gradplot_%s_%s_%s" x1="0" y1="0" x2="0" y2="1">',$topValColor,$bottomValColor,(defined $lr ? $lr:0));
+
+  for (my $i=0; $i<=1;$i+=0.10) {
+    my ($color)=get_color(($topVal-$bottomVal)*(1-$i)+$bottomVal,$min,$max,$minColor,$maxColor,$func);
+    $out.= sprintf('<stop offset="%s" style="stop-color:%s;stop-opacity:1"/>',$i,color($color,$lr));
+  }
+  $out.= '</linearGradient>';
+
+  $out.= sprintf('<linearGradient id="gradplotLight_%s_%s_%s" x1="0" y1="0" x2="0" y2="1">',$topValColor,$bottomValColor,(defined $lr ? $lr:0));
+  $out.= sprintf('<stop offset="0" style="stop-color:%s;stop-opacity:%s"/>',color($topValColor,$lr),$topOpacity);
+  $out.= sprintf('<stop offset="%s" style="stop-color:%s;stop-opacity:%s"/>',$nullProp,color($nullColor,$lr),$nullOpacity) if (defined $nullProp);
+  $out.= sprintf('<stop offset="1" style="stop-color:%s;stop-opacity:%s"/></linearGradient>',color($bottomValColor,$lr),$bottomOpacity);
+  $out.= '</defs>';
+  $out.= sprintf('<rect x="11" y="0" width="%d" height="%d" rx="2" ry="2" fill="url(#gradcardback)"/>',$bwidth-2,$bheight);
+
+  if (defined $header) {
+    $out.= sprintf('<text text-anchor="start" x="14" y="19" style="fill:#CCCCCC; font-size:12.5px;%s">%s</text>',$header_style,$header_txt); 
+    if (defined $icon and $icon ne "" and  $icon ne " ") {
+      my $svg_icon=::FW_makeImage($ic);
+      if(!($svg_icon =~ s/\sheight="[^"]*"/ height="20"/)) {
+          $svg_icon =~ s/svg/svg height="20"/ 
+      }
+      if(!($svg_icon =~ s/\swidth="[^"]*"/ width="20"/)) {
+          $svg_icon =~ s/svg/svg width="20"/ 
+      }
+      $out.='<g transform="translate(146,1) scale('.$iscale.') rotate('.$rotate.',10,10) ">';
+      $out.= $svg_icon;
+      $out.='</g>';
+    }
+    $out.='<polyline points="11,23 169,23"  style="stroke:gray; stroke-width:0.7" />';
+  }
+  $out.= sprintf('<g transform="translate(0,%d)">',$htrans);
+  $out.='<polyline points="11,73 169,73"  style="stroke:gray; stroke-width:0.7" />';
+  $out.= '<svg width="104" height="72">';
+  $out.= '<g transform="translate(35,8) scale(1) ">';
+  my $points="";
+  my $v;
+  my $last;
+  my $j=0;
+ 
+  $out.= '<rect x="-0.5" y="-0.5" width="60" height="51" rx="1" ry="1" fill="url(#gradcardback)"/>';
+
+  for (my $i=1;$i<4;$i++) {
+    my $y=$i*12.5;
+    $out.=sprintf('<polyline points="0,%s 60,%s"  style="stroke:gray; stroke-width:0.2; stroke-dasharray:1,1; stroke-opacity:1"/>',$y,$y);
+  }
+  
+  for (my $i=0;$i<=4;$i++) {
+    my $v=($maxPlot-$minPlot)*(1-$i*0.25)+$minPlot;
+    my ($color)= get_color($v,$min,$max,$minColor,$maxColor,$func); 
+    $out.= sprintf('<text text-anchor="end" x="-2.5" y="%s" style="fill:%s;font-size:7px;%s">%s</text>',$i*12.5+2,color($color,$lmm),"",sprintf($format,$v)); 
+  } 
+  
+  my $timebeginn=$time-$hours*3600;
+  
+  my $scale;
+  if  ($hours % 6 == 0) {
+    $scale=$hours/6;
+  }
+  if (defined $scale) {
+    my ($sec,$minutes,$hour,$mday,$month,$year,$wday,$yday,$isdst) = localtime($timebeginn);
+    my $beginhour=int($hour/$scale)*$scale;
+    my $diffminutes=($hour-$beginhour)*60+$minutes;
+    my $pos=int ($diffminutes/($scale*60)*1000)/100; 
+  
+    $out.=sprintf('<text text-anchor="middle" x="-0.5" y="60" style="fill:#CCCCCC;font-size:7px">%02d</text>',$beginhour) if ($pos == 0);
+    for (my $i=0;$i<=5;$i++) {
+      my $hour=$beginhour+($i+1)*$scale;
+      $hour=($hour >= 24 ? $hour % 24:$hour);
+      my $x=$i*10-$pos+9;
+      $out.=sprintf('<polyline points="%s,%s %s,%s"  style="stroke:gray; stroke-width:0.2; stroke-dasharray:1,1; stroke-opacity:1" />',$x,0,$x,50) if ($x >= 0);
+      $out.=sprintf('<text text-anchor="middle" x="%s" y="60" style="fill:#CCCCCC;font-size:7px">%02d</text>',$x,$hour);
+    }
+  } else {
+    for (my $i=0;$i<2;$i++) {
+      my $x=($i+1)*20-1;
+      $out.=sprintf('<polyline points="%s,%s %s,%s"  style="stroke:gray; stroke-width:0.2; stroke-dasharray:1,1; stroke-opacity:1" />',$x,0,$x,50);
+    }
+    for (my $i=0;$i<=3;$i++) {
+      my $x=($i+1)*20-1;
+      $out.=sprintf('<text text-anchor="middle" x="%s" y="60" style="fill:#CCCCCC;font-size:7px">%s</text>',$i*20-1,::strftime("%H:%M",localtime($time-$hours*3600*(1-$i/3))));
+    }
+  }
+
+  if (@{$a} > 0) {
+    if (!defined ${$a}[0]) {
+      if (defined $last_value) {
+        $v=$last_value;
+      } else {
+        for ($j=0;$j<@{$a};$j++) {
+          if (defined ${$a}[$j]) {
+           $v=${$a}[$j];
+           last;
+          }
+        }
+      }   
+    } else {
+      $v=${$a}[0];
+    }
+
+    $points.="$j,$xpos ";
+    $last=(50-int(($v*$m+$n)*10)/10);
+    $points.="$j,".$last." ";
+    $j++;
+    
+    for (my $i=$j;$i<@{$a};$i++) {
+      if (defined ${$a}[$i]) {
+        $points.="$i,".$last." " if (!defined ${$a}[$i-1] or $steps eq "1"); # or $i-2 >= 0 and !defined ${$a}[$i-2] or $i-3 >= 0 and !defined ${$a}[$i-3] or $i-4 >= 0 and !defined ${$a}[$i-4]);
+        $last=(50-int((${$a}[$i]*$m+$n)*10)/10);
+        $points.="$i,".$last." ";
+      }
+    }
+    $out.=sprintf('<path d="M59,%s L',$xpos);
+    $out.= $points;
+    $out.= sprintf('" style="fill:url(#gradplotLight_%s_%s_%s);stroke:url(#gradplot_%s_%s_%s);stroke-width:0.5" />',$topValColor,$bottomValColor,(defined $lr ? $lr:0),$topValColor,$bottomValColor,(defined $lr ? $lr:0));
+  }
+  $out.=sprintf('<polyline points="0,%s 59,%s"  style="stroke:gray; stroke-width:0.2; stroke-opacity:1" />',$xpos,$xpos);
+
+  $out.=sprintf('<circle cx="%s" cy="%s" r="2" fill="%s"  opacity="0.7" />',$maxValSlot,(50-int((${$a}[$maxValSlot]*$m+$n)*10)/10),color($maxValColor,$ln)) if (defined $maxValSlot and $maxValSlot != 59);
+  $out.=sprintf('<circle cx="%s" cy="%s" r="2" fill="%s"  opacity="0.7"/>,',$minValSlot,(50-int((${$a}[$minValSlot]*$m+$n)*10)/10),color($minValColor,$ln)) if (defined $minValSlot and $minValSlot != 59);
+  $out.=sprintf('<circle cx="59" cy="%s" r="2" fill="%s"  opacity="0.7"> <animate attributeName="opacity" values="0.2;1;0.2" dur="2s" repeatCount="indefinite"/></circle>',(50-int(($value*$m+$n)*10)/10),color($currColor,$ln));
+  $out.= '</g>';
+  $out.= '</svg>';
+
+  $out.='<g transform="translate(105,6)">';
+  $out.= ui_Table::ring($val,$min,$max,$minColor,$maxColor,$unit,92,$func,$decfont,$model,$lightness,undef,(defined $header or !defined $icon) ? undef: $icon);
+  $out.='</g>';
+  
+  $out.=sprintf('<text text-anchor="middle" x="133" y="68" style="fill:#CCCCCC;font-size:8px">%s</text>',::strftime("%H:%M:%S",localtime($time)));
+
+
+  if (defined $maxValTime) {
+    $out.= sprintf('<text text-anchor="start" x="13" y="85" style="fill:#CCCCCC;font-size:10px">▲%s</text>',::strftime("%H:%M",localtime($maxValTime)));
+    $out.= sprintf('<text text-anchor="end" x="85" y="85" style="fill:%s;font-size:10px;%s">%s</text>',color($maxValColor,$lmm),"",sprintf($format,${$collect}{max_value}));
+  }
+  if (defined $minValTime) {
+    $out.= sprintf('<text text-anchor="start" x="89" y="85" style="fill:#CCCCCC;font-size:10px">• ▼%s</text>',::strftime("%H:%M",localtime($minValTime)));
+    $out.= sprintf('<text text-anchor="end" x="165" y="85" style="fill:%s;font-size:10px;%s">%s</text>',color($minValColor,$lmm),"",sprintf($format,${$collect}{min_value}));
+  }
+ 	$out.='</g>';
+  $out.= '</svg>';
+return ($out);
+}
+
 sub bar
 {
-  my ($val,$min,$max,$header,$minColor,$maxColor,$unit,$bwidth,$bheight,$size,$func,$dec,$model,$lr,$ln,$icon) = @_;
+  my ($val,$min,$max,$header,$minColor,$maxColor,$unit,$bwidth,$bheight,$size,$func,$decfont,$model,$lr,$ln,$icon) = @_;
   my $out;
   my $trans=0;
   my ($format,$value);
-  my ($ic,$iscale,$ix,$iy);
+  my ($ic,$iscale,$ix,$iy,$rotate);
   my $minCol=$minColor;
+  my $ypos;
+  
+  my ($dec,$fontformat,$unitformat);
+  ($dec,$fontformat,$unitformat)=split (/,/,$decfont) if (defined $decfont);
+  $fontformat="" if (!defined $fontformat);
+  $unitformat="" if (!defined $unitformat);
+ 
   
   if (defined $lr) {
     if (!defined $ln) {
@@ -4315,7 +4767,13 @@ sub bar
   } 
   
   $unit="" if (!defined $unit);
-  $bheight=60 if (!defined $bheight);
+  if (!defined $bheight) {
+    if (defined ($icon)) {
+      $bheight=75;
+    } else {
+      $bheight=60;
+    }
+  }  
   my $height=$bheight-10;
  
   if (!defined $header or $header eq "") {
@@ -4331,6 +4789,9 @@ sub bar
   $max=100 if (!defined $max);
   
   $dec=1 if (!defined $dec);
+  
+  
+  $ypos= (defined ($icon) and $bheight >= 75) ? int($height/2-3):int($height/2+3);
 
   ($format,$value,$val)=format_value($val,$min,$dec);
 
@@ -4342,8 +4803,8 @@ sub bar
     $maxColor=0 if (!defined $maxColor);
   }
   $minCol=$minColor;
-  $max=$value if($value>$max);
-  $min=$value if ($value<$min);
+  $value=$max if($value>$max);
+  $value=$min if ($value<$min);
   $size=100 if (!defined $size);
   
   my $prop=($value-$min)/($max-$min);
@@ -4368,29 +4829,34 @@ sub bar
   }
   
   if (defined ($icon)) {
-    ($ic,$iscale,$ix,$iy,)=split(",",$icon);
+    ($ic,$iscale,$ix,$iy,$rotate)=split(",",$icon);
     if (defined ($ix)) {
-      $ix+=$bwidth/2+5;
+      $ix+=$bwidth/2+3;
     } else {
-      $ix=$bwidth/2+5;
+      $ix=$bwidth/2+3;
     };
     if (defined ($iy)) {
-      $iy+=($height/2-12);
+      $iy+=($ypos-14);
     } else {
-      $iy=($height/2-12);
+      $iy=($ypos-14);
     };
-    $iscale=1 if (!defined($iscale));
+    $rotate=0 if (!defined $rotate);
+    $iscale=1 if (!defined $iscale);
+    $ic="" if (!defined($ic));
   }
 
-  
-  $out.= sprintf ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 0 %d %d" style="width:%dpx; height:%dpx;">',$bwidth,$bheight,$size/100*$bwidth,$size/100*$bheight);
+   
+  my $svg_width=int($size/100*$bwidth);
+  my $svg_height=int($size/100*$bheight);
+ 
+  $out.= sprintf ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 0 %d %d" width="%d" height="%d" style="width:%dpx; height:%dpx;">',$bwidth,$bheight,$svg_width,$svg_height,$svg_width,$svg_height);
   $out.= '<defs>';
   $out.= '<linearGradient id="gradbarfont" x1="0" y1="1" x2="0" y2="0"><stop offset="0" style="stop-color:white;stop-opacity:0.3"/><stop offset="1" style="stop-color:rgb(255, 255, 255);stop-opacity:0.1"/></linearGradient>';
-  $out.= '<linearGradient id="gradbackg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" style="stop-color:rgb(255,255,255);stop-opacity:0.3"/><stop offset="1" style="stop-color:rgb(0, 0, 0);stop-opacity:0"/></linearGradient>';
-  $out.= '<linearGradient id="gradbackbar" x1="0" y1="1" x2="0" y2="0"><stop offset="0" style="stop-color:rgb(32,32,32);stop-opacity:1"/><stop offset="1" style="stop-color:rgb(64, 64, 64);stop-opacity:0.7"/></linearGradient>';
+  $out.= '<linearGradient id="gradbackg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" style="stop-color:rgb(255,255,255);stop-opacity:0.3"/><stop offset="1" style="stop-color:rgb(0, 0, 0);stop-opacity:0.3"/></linearGradient>';
+  $out.= '<linearGradient id="gradbackbar" x1="0" y1="1" x2="0" y2="0"><stop offset="0" style="stop-color:rgb(32,32,32);stop-opacity:0.9"/><stop offset="1" style="stop-color:rgb(64, 64, 64);stop-opacity:0.9"/></linearGradient>';
   $out.= sprintf('<linearGradient id="gradbar_%d_%d_%d" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:%s;stop-opacity:1"/><stop offset="1" style="stop-color:%s;stop-opacity:0.5"/></linearGradient>',$currColor,$minColor,(defined $lr ? $lr:-1),color($currColor,$lr),color($minColor,$lr));
   $out.= '</defs>';
-  $out.= sprintf('<rect x="11" y="0" width="%d" height="%d" rx="5" ry="5" fill="url(#gradbackbar)"/>',$bwidth-3,$bheight);
+  $out.= sprintf('<rect x="11" y="0" width="%d" height="%d" rx="2" ry="2" fill="url(#gradbackbar)"/>',$bwidth-3,$bheight);
   $out.= sprintf('<text text-anchor="middle" x="%d" y="13" style="fill:white; font-size:14px">%s</text>',$bwidth/2+10,$header) if (defined $header and $header ne ""); 
   $out.= sprintf('<g transform="translate(0,%d)">',$trans);
   my $nullColor;
@@ -4412,12 +4878,11 @@ sub bar
 
   $out.= sprintf('<text x="23" y="10" style="fill:%s;font-size:9px;">%s</text>',color($maxColor,$ln),sprintf($format,$max));
   $out.= sprintf('<text x="23" y="%d" style="fill:%s;font-size:9px;">%s</text>',$height+9,color($minCol,$ln),sprintf($format,$min));
-  $out.= sprintf('<rect x="15" y="%d" width="5" height="%d" rx="2" ry="2" fill="url(#gradbar_%d_%d_%d)"/>',$y,$val1,$currColor,$minColor,(defined $lr ? $lr:-1));
-  $out.= sprintf('<rect x="15" y="6" width="5" height="%d" rx="2" ry="2" fill="url(#gradbackg)"/>',$height);
-  ##$out.= sprintf('<rect x="15" y="6" width="10" height="%d" rx="2" ry="2" fill="none" stroke="rgb(160, 160, 160)" stroke-width="0.5"/>',$height);
+  $out.= sprintf('<rect x="15" y="%d" width="5" height="%d" rx="1" ry="1" fill="url(#gradbar_%d_%d_%d)"/>',$y,$val1,$currColor,$minColor,(defined $lr ? $lr:-1));
+  $out.= sprintf('<rect x="15" y="6" width="5" height="%d" rx="1" ry="1" fill="url(#gradbackg)"/>',$height);
   $out.= sprintf('<line  x1="15.5"  y1="%d" x2="19.5" y2="%d" fill="none" stroke="rgb(192,192,192)" stroke-width="1"/>',$null,$null) if ($min < 0 and $max > 0);;
 
-  if (defined $icon and $icon ne "") {
+  if (defined $icon and $icon ne "" and  $icon ne " ") {
     my $svg_icon=::FW_makeImage($ic);
     if(!($svg_icon =~ s/\sheight="[^"]*"/ height="22"/)) {
         $svg_icon =~ s/svg/svg height="22"/ 
@@ -4425,75 +4890,97 @@ sub bar
     if(!($svg_icon =~ s/\swidth="[^"]*"/ width="22"/)) {
         $svg_icon =~ s/svg/svg width="22"/ 
     }
-    $out.='<g transform="translate('.$ix.', '.$iy.') translate(11, 11) scale('.$iscale.') translate(-11, -11)">';
+    $out.='<g transform="translate('.$ix.', '.$iy.') translate(11, 11) scale('.$iscale.') translate(-11, -11) rotate('.$rotate.',11,11) ">';
     $out.= $svg_icon;
     $out.='</g>';
-
-##    $out.='<symbol id="Image_'."$ic $ix $iy".'" x="'.$ix.'" y="'.$iy.'" viewBox="0 0 '.int(640/$iscale).' '.int(640/$iscale).'">';
-##    $out.= ::FW_makeImage($ic);
-##    $out.='</symbol>';
-##    $out.='<use href="#Image_'."$ic $ix $iy".'" height="22" width="22" />';#height="18" width="18"
-##    $out.='</g>';
+  }
+  my ($valInt,$valDec)=split(/\./,sprintf($format,$val));
+  
+  
+  if ($bheight>=75 or !defined ($icon) and $bheight >= 50) {
+    if (defined $valDec) {
+      $out.= sprintf('<text text-anchor="middle" x="%d" y="%d" style="fill:%s"><tspan style="font-size:16px;font-weight:bold;%s">%s<tspan style="font-size:85%%;">.%s</tspan></tspan></text>',
+             $bwidth/2+15,(defined ($icon) ? $ypos+24:$ypos+5),color($currColor,$ln),$fontformat,$valInt,$valDec);
+ 
+      $out.= sprintf('<text text-anchor="middle" x="%d" y="%d" style="fill:%s"><tspan style="font-size:10px;%s">%s</tspan></text>',
+             $bwidth/2+15,(defined ($icon) ? $ypos+35:$ypos+16),color($currColor,$ln),$unitformat,$unit);
+    } else {
+      $out.= sprintf('<text text-anchor="middle" x="%d" y="%d" style="fill:%s"><tspan style="font-size:16px;font-weight:bold;%s">%s</tspan></text>',
+             $bwidth/2+15,(defined ($icon) ? $ypos+24:$ypos+5),color($currColor,$ln),$fontformat,$valInt);
+      
+      $out.= sprintf('<text text-anchor="middle" x="%d" y="%d" style="fill:%s"><tspan style="font-size:10px;%s">%s</tspan></text>',
+             $bwidth/2+15,(defined ($icon) ? $ypos+35:$ypos+16),color($currColor,$ln),$unitformat,$unit);
+    }
+  } else {
+    if (defined $valDec) {
+      $out.= sprintf('<text text-anchor="middle" x="%d" y="%d" style="fill:%s"><tspan style="font-size:16px;font-weight:bold;%s">%s<tspan style="font-size:85%%;">.%s</tspan></tspan><tspan dx="2" style="font-size:10px;%s">%s</tspan></text>',
+             $bwidth/2+15,(defined ($icon) ? $height/2+25:$height/2+12),color($currColor,$ln),$fontformat,$valInt,$valDec,$unitformat,$unit);
+    } else {
+      $out.= sprintf('<text text-anchor="middle" x="%d" y="%d" style="fill:%s"><tspan style="font-size:16px;font-weight:bold;%s">%s</tspan><tspan dx="2" style="font-size:10px;%s">%s</tspan></text>',
+             $bwidth/2+15,(defined ($icon) ? $height/2+25:$height/2+12),color($currColor,$ln),$fontformat,$valInt,$unitformat,$unit);
+    }
   }
   
-  $out.= sprintf('<text text-anchor="end" x="%d" y="%d" style="fill:%s"><tspan style="font-size:14px;font-weight:bold;">%s</tspan><tspan dx="2" style="font-size:10px">%s</tspan></text>',$bwidth+6,(defined ($icon) ? $height/2+23:$height/2+12),color($currColor,$ln),sprintf($format,$val),$unit);
-
   $out.= '</g>';
  	$out.= '</svg>';
 return ($out);
 }
  
 sub temp_bar {
-  my ($value,$min,$max,$header,$width,$height,$size,$lightbar,$lightnumber) = @_;
+  my ($value,$min,$max,$header,$width,$height,$size,$lightbar,$lightnumber,$decfont) = @_;
   $min=-20 if (!defined $min or $min eq "");
   $max=60  if (!defined $max or $max eq "");
-  return(bar($value,$min,$max,$header,undef,undef,"°C",$width,$height,$size,\&temp_hue,1,undef,$lightbar,$lightnumber));
+  $decfont=1 if (!defined $decfont);
+  return(bar($value,$min,$max,$header,undef,undef,"°C",$width,$height,$size,\&temp_hue,$decfont,undef,$lightbar,$lightnumber));
 } 
 
 sub temp_mbar {
-  my ($value,$min,$max,$header,$width,$height,$size,$lightbar,$lightnumber) = @_;
+  my ($value,$min,$max,$header,$width,$height,$size,$lightbar,$lightnumber,$decfont) = @_;
   $min=-20 if (!defined $min or $min eq "");
   $max=60  if (!defined $max or $max eq "");
-  return(bar($value,$min,$max,$header,undef,undef,"°C",$width,$height,$size,\&temp_hue,1,1,$lightbar,$lightnumber));
+  $decfont=1 if (!defined $decfont);
+  return(bar($value,$min,$max,$header,undef,undef,"°C",$width,$height,$size,\&temp_hue,$decfont,1,$lightbar,$lightnumber));
 } 
 
 sub icon_temp_bar {
-  my ($icon,$value,$min,$max,$header,$width,$height,$size,$lightbar,$lightnumber) = @_;
+  my ($icon,$value,$min,$max,$header,$width,$height,$size,$lightbar,$lightnumber,$decfont) = @_;
   $min=-20 if (!defined $min or $min eq "");
   $max=60  if (!defined $max or $max eq "");
-  return(bar($value,$min,$max,$header,undef,undef,"°C",$width,$height,$size,\&temp_hue,1,undef,$lightbar,$lightnumber,$icon));
+  $decfont=1 if (!defined $decfont);
+  return(bar($value,$min,$max,$header,undef,undef,"°C",$width,$height,$size,\&temp_hue,$decfont,undef,$lightbar,$lightnumber,$icon));
 } 
 
 sub icon_temp_mbar {
-  my ($icon,$value,$min,$max,$header,$width,$height,$size,$lightbar,$lightnumber) = @_;
+  my ($icon,$value,$min,$max,$header,$width,$height,$size,$lightbar,$lightnumber,$decfont) = @_;
   $min=-20 if (!defined $min or $min eq "");
   $max=60  if (!defined $max or $max eq "");
-  return(bar($value,$min,$max,$header,undef,undef,"°C",$width,$height,$size,\&temp_hue,1,1,$lightbar,$lightnumber,$icon));
+  $decfont=1 if (!defined $decfont);
+  return(bar($value,$min,$max,$header,undef,undef,"°C",$width,$height,$size,\&temp_hue,$decfont,1,$lightbar,$lightnumber,$icon));
 } 
 
 
 sub hum_bar {
-  my ($value,$header,$width,$height,$size,$lightbar,$lightnumber) = @_;
-##  $width=50 if (!defined $width);
-  return(bar($value,0,100,$header,undef,undef,"%",$width,$height,$size,\&hum_hue,0,undef,$lightbar,$lightnumber));
+  my ($value,$header,$width,$height,$size,$lightbar,$lightnumber,$decfont) = @_;
+  $decfont=0 if (!defined $decfont);
+  return(bar($value,0,100,$header,undef,undef,"%",$width,$height,$size,\&hum_hue,$decfont,undef,$lightbar,$lightnumber));
 } 
 
 sub hum_mbar {
-  my ($value,$header,$width,$height,$size,$lightbar,$lightnumber) = @_;
-##  $width=50 if (!defined $width);
-  return(bar($value,0,100,$header,undef,undef,"%",$width,$height,$size,\&hum_hue,0,1,$lightbar,$lightnumber));
+  my ($value,$header,$width,$height,$size,$lightbar,$lightnumber,$decfont) = @_;
+  $decfont=0 if (!defined $decfont);
+  return(bar($value,0,100,$header,undef,undef,"%",$width,$height,$size,\&hum_hue,$decfont,1,$lightbar,$lightnumber));
 } 
 
 sub icon_hum_bar {
-  my ($icon,$value,$header,$width,$height,$size,$lightbar,$lightnumber) = @_;
-##  $width=50 if (!defined $width);
-  return(bar($value,0,100,$header,undef,undef,"%",$width,$height,$size,\&hum_hue,0,undef,$lightbar,$lightnumber,$icon));
+  my ($icon,$value,$header,$width,$height,$size,$lightbar,$lightnumber,$decfont) = @_;
+  $decfont=0 if (!defined $decfont);
+  return(bar($value,0,100,$header,undef,undef,"%",$width,$height,$size,\&hum_hue,$decfont,undef,$lightbar,$lightnumber,$icon));
 } 
 
 sub icon_hum_mbar {
-  my ($icon,$value,$header,$width,$height,$size,$lightbar,$lightnumber) = @_;
-##  $width=50 if (!defined $width);
-  return(bar($value,0,100,$header,undef,undef,"%",$width,$height,$size,\&hum_hue,0,1,$lightbar,$lightnumber,$icon));
+  my ($icon,$value,$header,$width,$height,$size,$lightbar,$lightnumber,$decfont) = @_;
+  $decfont=0 if (!defined $decfont);
+  return(bar($value,0,100,$header,undef,undef,"%",$width,$height,$size,\&hum_hue,$decfont,1,$lightbar,$lightnumber,$icon));
 }
 
 sub icon_bar {
@@ -4509,8 +4996,8 @@ sub icon_mbar {
 sub  polarToCartesian {
   my ($centerX,$centerY,$radius,$angleInDegrees)=@_;
   my $angleInRadians = ($angleInDegrees-230) * ::pi() / 180.0;
-  my $x= sprintf('%1.1f',$centerX + ($radius * cos($angleInRadians)));
-  my $y= sprintf('%1.1f',$centerY + ($radius * sin($angleInRadians)));
+  my $x= sprintf('%1.2f',$centerX + ($radius * cos($angleInRadians)));
+  my $y= sprintf('%1.2f',$centerY + ($radius * sin($angleInRadians)));
   return($x,$y);
 }
 
@@ -4529,7 +5016,7 @@ sub color {
    return ($hue);
   }
   my $l;
-  if (defined $lightness) {
+  if (defined $lightness and $lightness ne "") {
     $l=$lightness;
   } else {
     if ($hue>180 and $hue<290) {
@@ -4542,123 +5029,177 @@ sub color {
 }
 
 sub temp_uring {
-  my ($value,$min,$max,$size,$type,$lightring,$lightnumber,$icon) = @_;
+  my ($value,$min,$max,$size,$type,$lightring,$lightnumber,$icon,$decfont) = @_;
   $min=-20 if (!defined $min);
   $max=60  if (!defined $max);
-  $size=80 if (!defined $size);
-  return(ring($value,$min,$max,undef,undef,"°C",$size,\&temp_hue,1,$type,$lightring,$lightnumber,$icon));
+  $size=85 if (!defined $size);
+  $decfont=1 if (!defined $decfont);
+  return(ring($value,$min,$max,undef,undef,"°C",$size,\&temp_hue,$decfont,$type,$lightring,$lightnumber,$icon));
 }
 
 sub temp_ring{
-  my ($value,$min,$max,$size,$lightring,$lightnumber) = @_;
-  return(temp_uring($value,$min,$max,$size,undef,$lightring,$lightnumber));
+  my ($value,$min,$max,$size,$lightring,$lightnumber,$decfont) = @_;
+  return(temp_uring($value,$min,$max,$size,undef,$lightring,$lightnumber,undef,$decfont));
 }
 
 sub temp_mring{
-  my ($value,$min,$max,$size,$lightring,$lightnumber) = @_;
-  return(temp_uring($value,$min,$max,$size,1,$lightring,$lightnumber));
+  my ($value,$min,$max,$size,$lightring,$lightnumber,$decfont) = @_;
+  return(temp_uring($value,$min,$max,$size,1,$lightring,$lightnumber,undef,$decfont));
 }
 sub icon_temp_ring{
-  my ($icon,$value,$min,$max,$size,$lightring,$lightnumber) = @_;
+  my ($icon,$value,$min,$max,$size,$lightring,$lightnumber,$decfont) = @_;
   $size=100 if (!defined $size);
-  return(temp_uring($value,$min,$max,$size,undef,$lightring,$lightnumber,$icon));
+  return(temp_uring($value,$min,$max,$size,undef,$lightring,$lightnumber,$icon,$decfont));
 }
 
 sub icon_temp_mring{
-  my ($icon,$value,$min,$max,$size,$lightring,$lightnumber) = @_;
+  my ($icon,$value,$min,$max,$size,$lightring,$lightnumber,$decfont) = @_;
   $size=100 if (!defined $size);
-  return(temp_uring($value,$min,$max,$size,1,$lightring,$lightnumber,$icon));
+  return(temp_uring($value,$min,$max,$size,1,$lightring,$lightnumber,$icon,$decfont));
 }
 
 sub hum_uring {
-  my ($value,$size,$type,$lightring,$lightnumber,$icon) = @_;
-  $size=80 if (!defined $size);
-  return(ring($value,0,100,undef,undef,"%",$size,\&hum_hue,0,$type,$lightring,$lightnumber,$icon));
+  my ($value,$size,$type,$lightring,$lightnumber,$icon,$decfont) = @_;
+  $size=85 if (!defined $size);
+  $decfont=0 if (!defined $decfont);
+  return(ring($value,0,100,undef,undef,"%",$size,\&hum_hue,$decfont,$type,$lightring,$lightnumber,$icon));
 } 
 
 sub hum_ring{
-  my ($value,$size,$lightring,$lightnumber) = @_;
-  return(hum_uring($value,$size,undef,$lightring,$lightnumber));
+  my ($value,$size,$lightring,$lightnumber,$decfont) = @_;
+  return(hum_uring($value,$size,undef,$lightring,$lightnumber,undef,$decfont));
 }
 
 sub hum_mring{
-  my ($value,$size,$lightring,$lightnumber) = @_;
-  return(hum_uring($value,$size,1,$lightring,$lightnumber));
+  my ($value,$size,$lightring,$lightnumber,$decfont) = @_;
+  return(hum_uring($value,$size,1,$lightring,$lightnumber,undef,$decfont));
 }
 
 sub icon_hum_ring{
-  my ($icon,$value,$size,$lightring,$lightnumber) = @_;
+  my ($icon,$value,$size,$lightring,$lightnumber,$decfont) = @_;
   $size=100 if (!defined $size);
-  return(hum_uring($value,$size,undef,$lightring,$lightnumber,$icon));
+  return(hum_uring($value,$size,undef,$lightring,$lightnumber,$icon,$decfont));
 }
 
 sub icon_hum_mring{
-  my ($icon,$value,$size,$lightring,$lightnumber) = @_;
+  my ($icon,$value,$size,$lightring,$lightnumber,$decfont) = @_;
   $size=100 if (!defined $size);
-  return(hum_uring($value,$size,1,$lightring,$lightnumber,$icon));
+  return(hum_uring($value,$size,1,$lightring,$lightnumber,$icon,$decfont));
 }
 
 sub temp_hum_ring {
-  my ($value,$value2,$min,$max,$size,$lightring,$lightnumber) = @_;
+  my ($value,$value2,$min,$max,$size,$lightring,$lightnumber,$decfont1,$decfont2) = @_;
   $min=-20 if (!defined $min);
   $max=60  if (!defined $max);
   $size=90 if (!defined $size);
-  return(ring2($value,$min,$max,undef,undef,"°C",$size,\&temp_hue,1,$value2,0,100,0,0,"%",\&hum_hue,0,$lightring,$lightnumber));
+  $decfont1=1 if (!defined $decfont1);
+  $decfont2=0 if (!defined $decfont2);
+  return(ring2($value,$min,$max,undef,undef,"°C",$size,\&temp_hue,$decfont1,$value2,0,100,0,0,"%",\&hum_hue,$decfont2,$lightring,$lightnumber));
 } 
 
 sub temp_temp_ring {
-  my ($value,$value2,$min,$max,$size,$lightring,$lightnumber) = @_;
+  my ($value,$value2,$min,$max,$size,$lightring,$lightnumber,$decfont1,$decfont2) = @_;
   $min=-20 if (!defined $min);
   $max=60  if (!defined $max);
   $size=90 if (!defined $size);
-  return(ring2($value,$min,$max,undef,undef,"°C",$size,\&temp_hue,1,$value2,$min,$max,undef,undef,"°C",\&temp_hue,1,$lightring,$lightnumber));
+  $decfont1=1 if (!defined $decfont1);
+  $decfont2=1 if (!defined $decfont2);
+  return(ring2($value,$min,$max,undef,undef,"°C",$size,\&temp_hue,$decfont1,$value2,$min,$max,undef,undef,"°C",\&temp_hue,$decfont2,$lightring,$lightnumber));
 } 
 
 sub icon_ring {
-  my ($icon,$val,$min,$max,$minColor,$maxColor,$unit,$dec,$size,$func,$lr,$ln) = @_;
-  return(ring ($val,$min,$max,$minColor,$maxColor,$unit,$size,$func,$dec,undef,$lr,$ln,$icon));
+  my ($icon,$val,$min,$max,$minColor,$maxColor,$unit,$decfont,$size,$func,$lr,$ln,$mode) = @_;
+  return(ring ($val,$min,$max,$minColor,$maxColor,$unit,$size,$func,$decfont,$mode,$lr,$ln,$icon));
 }
 
 sub icon_mring {
-  my ($icon,$val,$min,$max,$minColor,$maxColor,$unit,$dec,$size,$func,$lr,$ln) = @_;
-  return(ring ($val,$min,$max,$minColor,$maxColor,$unit,$size,$func,$dec,1,$lr,$ln,$icon,$icon));
+  my ($icon,$val,$min,$max,$minColor,$maxColor,$unit,$decfont,$size,$func,$lr,$ln) = @_;
+  return(ring ($val,$min,$max,$minColor,$maxColor,$unit,$size,$func,$decfont,1,$lr,$ln,$icon,$icon));
+}
+
+sub icon_uring {
+  my ($mode,$icon,$val,$min,$max,$minColor,$maxColor,$unit,$decfont,$size,$func,$lr,$ln) = @_;
+  return(ring ($val,$min,$max,$minColor,$maxColor,$unit,$size,$func,$decfont,$mode,$lr,$ln,$icon));
 }
 
 sub mring
 {
-  my ($val,$min,$max,$minColor,$maxColor,$unit,$size,$func,$dec,$lr,$ln) = @_;
-  return(ring($val,$min,$max,$minColor,$maxColor,$unit,$size,$func,$dec,1,$lr,$ln));
+  my ($val,$min,$max,$minColor,$maxColor,$unit,$size,$func,$decfont,$lr,$ln) = @_;
+  return(ring($val,$min,$max,$minColor,$maxColor,$unit,$size,$func,$decfont,1,$lr,$ln));
 }
+
+sub uring
+{
+  my ($mode,$val,$min,$max,$minColor,$maxColor,$unit,$size,$func,$decfont,$lr,$ln) = @_;
+  return(ring($val,$min,$max,$minColor,$maxColor,$unit,$size,$func,$decfont,$mode,$lr,$ln));
+}
+
+sub icon_ring2 {
+    my ($icon,$val,$min,$max,$minColor,$maxColor,$unit,$size,$func,$dec,$val2,$min2,$max2,$minColor2,$maxColor2,$unit2,$func2,$dec2,$lr,$ln) = @_;
+    return (ring2($val,$min,$max,$minColor,$maxColor,$unit,$size,$func,$dec,$val2,$min2,$max2,$minColor2,$maxColor2,$unit2,$func2,$dec2,$lr,$ln,$icon));
+}
+
+
+sub icon_temp_hum_ring {
+  my ($icon,$value,$value2,$min,$max,$size,$lightring,$lightnumber,$decfont1,$decfont2) = @_;
+  $min=-20 if (!defined $min);
+  $max=60  if (!defined $max);
+  $size=100 if (!defined $size);
+  $decfont1=1 if (!defined $decfont1);
+  $decfont2=0 if (!defined $decfont2);
+  return(ring2($value,$min,$max,undef,undef,"°C",$size,\&temp_hue,$decfont1,$value2,0,100,0,0,"%",\&hum_hue,$decfont2,$lightring,$lightnumber,$icon));
+} 
+
+sub icon_temp_temp_ring {
+  my ($icon,$value,$value2,$min,$max,$size,$lightring,$lightnumber,$decfont1,$decfont2) = @_;
+  $min=-20 if (!defined $min);
+  $max=60  if (!defined $max);
+  $size=100 if (!defined $size);
+  $decfont1=1 if (!defined $decfont1);
+  $decfont2=1 if (!defined $decfont2);
+  return(ring2($value,$min,$max,undef,undef,"°C",$size,\&temp_hue,$decfont1,$value2,$min,$max,undef,undef,"°C",\&temp_hue,$decfont2,$lightring,$lightnumber,$icon));
+} 
 
 sub ring
 {
-  my ($val,$min,$max,$minColor,$maxColor,$unit,$size,$func,$dec,$model,$lr,$ln,$icon) = @_;
+  my ($val,$min,$max,$minColor,$maxColor,$unit,$size,$func,$decfont,$mode,$lightness,$lnum,$icon) = @_;
   my $out;
+   
+  my ($monochrom,$minMax,$innerRing,$pointer);
+  ($monochrom,$minMax,$innerRing,$pointer)=split (/,/,$mode) if (defined $mode);
+ 
+  my ($dec,$fontformat,$unitformat);
+  ($dec,$fontformat,$unitformat)=split (/,/,$decfont) if (defined $decfont);
+  $fontformat="" if (!defined $fontformat);
+  $unitformat="" if (!defined $unitformat);
   
-  my ($ic,$iscale,$ix,$iy)=();
+  
+  my ($ic,$iscale,$ix,$iy,$rotate)=();
   
   if (defined ($icon)) {
-    ($ic,$iscale,$ix,$iy,)=split(",",$icon);
+    ($ic,$iscale,$ix,$iy,$rotate)=split(/,/,$icon);
     if (defined ($ix)) {
       $ix+=30;
     } else {
       $ix=30;
     };
     if (defined ($iy)) {
-      $iy+=8;
+      $iy+=8.5;
     } else {
-      $iy=8;
+      $iy=8.5;
     };
-    $iscale=1 if (!defined($iscale));
+    $rotate=0 if (!defined $rotate);
+    $iscale=1 if (!defined $iscale);
     $ic="" if (!defined($ic));
   }
     
   my ($format,$value);
-  if (defined $lr) {
-    if (!defined $ln) {
-       $ln=$lr;
-    }
-  } 
+  my ($lr,$lir,$lmm,$lu,$ln,$li);
+  
+  ($lr,$lir,$lmm,$lu,$ln,$li)=split (/,/,$lightness) if (defined $lightness);
+  
+  $ln=$lnum if (defined $lnum);
+  
   $min=0 if (!defined $min);
   $max=100 if (!defined $max);
   
@@ -4666,89 +5207,166 @@ sub ring
   
   ($format,$value,$val)=format_value($val,$min,$dec);
 
-  if (defined $func) {
+ 
+  $value=$max if ($value>$max);
+  $value=$min if ($value<$min);
+  $size=100 if (!defined $size);
+
+  my $prop=0;
+  $prop=($value-$min)/($max-$min) if ($max-$min);
+
+  my ($x1,$y1,$x2,$y2);
+  ($x1,$y1,$x2,$y2)=(int($prop*100),0,0,int((1-$prop)*100));
+  my $currColor;
+  
+  if (ref($func) eq "CODE") {
     $minColor=&{$func}($min);
     $maxColor=&{$func}($max);
+    $currColor=&{$func}($value);
+  } elsif (ref($func) eq "ARRAY") {
+    $minColor=${$func}[1];
+    $maxColor=${$func}[-1];
+    for (my $i=0;$i<@{$func};$i+=2) {
+      if ($value <= ${$func}[$i]) {
+        $currColor=${$func}[$i+1];
+        last;
+      }
+    }
   } else {
     $minColor=120 if (!defined $minColor);
     $maxColor=0 if (!defined $maxColor);
-  }
-  $max=$value if($value>$max);
-  $min=$value if ($value<$min);
-  $size=100 if (!defined $size);
-  my $prop=($value-$min)/($max-$min);
-  my ($x1,$y1,$x2,$y2);
-  ($x1,$y1,$x2,$y2)=($prop*100,0,0,(1-$prop)*100);
-  my $val1=int($prop*100)+20;
-  my $currColor;
-  if (defined $func) {
-    if (defined($model)) {
-      $minColor=&{$func}($value);
-    }
-    $currColor=&{$func}($value);
-  } else {
     if ($minColor < $maxColor) {
       $currColor=$prop*($maxColor-$minColor)+$minColor;
     } else {
       $currColor=(1-$prop)*($minColor-$maxColor)+$maxColor;
     }
-    if (defined($model)) {
-      $minColor=$currColor;
-    }
-  }  
-  if (defined $icon and $icon ne "") {
-    $ic="$ic\@".color($currColor,$ln) if ($icon !~ /@/); 
+  }
+  my $minCol=$minColor;
+  if (defined $monochrom and $monochrom==1) {
+    $minColor=$currColor;
   }
   
-  $out.= sprintf('<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 0 63 58 " style="width:%dpx; height:%dpx;">',$size/100*63,$size/100*58);
+  if (defined $icon and $icon ne "") {
+    $ic="$ic\@".color($currColor,$li) if ($ic !~ /@/); 
+  }
+  my $width=int($size/100*63);
+  my $height=int($size/100*58);
+  $out.= sprintf('<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 0 63 58" width="%d" height="%d" style="width:%dpx; height:%dpx">',$width,$height,$width,$height);
   $out.= '<defs>';
-  $out.= '<linearGradient id="gradbackring" x1="0" y1="1" x2="0" y2="0"><stop offset="0" style="stop-color:rgb(64,64,64);stop-opacity:0.8"/><stop offset="1" style="stop-color:rgb(32, 32, 32);stop-opacity:0.9"/></linearGradient>';
-  $out.= sprintf('<linearGradient id="grad_ring1_%d_%d_%d" x1="%d%%" y1="%d%%" x2="%d%%" y2="%d%%"><stop offset="0" style="stop-color:%s; stop-opacity:1"/>\
-  <stop offset="1" style="stop-color:%s;stop-opacity:0.5"/></linearGradient>',$currColor,$minColor,(defined $lr ? $lr:0),$x1,$y1,$x2,$y2,color($currColor,$lr),color($minColor,$lr));
- 
-  $out.= '<linearGradient id="grad_stroke3" x1="1" y1="0" x2="0" y2="0"><stop offset="0" style="stop-color:rgb(80,80,80); stop-opacity:0.6"/>\
-  <stop offset="1" style="stop-color:rgb(48,48,48); stop-opacity:0.8"/><linearGradient>';
+  $out.= '<linearGradient id="gradbackring1" x1="0" y1="1" x2="0" y2="0"><stop offset="0" style="stop-color:rgb(64,64,64);stop-opacity:0.9"/><stop offset="1" style="stop-color:rgb(24, 24, 24);stop-opacity:0.9"/></linearGradient>';
+  if (!defined $pointer) {
+    $out.= sprintf('<linearGradient id="grad_ring1_%d_%d_%d" x1="%d%%" y1="%d%%" x2="%d%%" y2="%d%%"><stop offset="0" style="stop-color:%s; stop-opacity:1"/>\
+    <stop offset="1" style="stop-color:%s;stop-opacity:0.5"/></linearGradient>',$currColor,$minColor,(defined $lr ? $lr:0),$x1,$y1,$x2,$y2,color($currColor,$lr),color($minColor,$lr));
+  } 
+  if (defined $innerRing and $innerRing and ref($func) ne "ARRAY") {
+    $out.= sprintf('<linearGradient id="grad_ring_max_%d_%d_%d" x1="%d%%" y1="%d%%" x2="%d%%" y2="%d%%"><stop offset="0" style="stop-color:%s; stop-opacity:1"/>\
+    <stop offset="1" style="stop-color:%s;stop-opacity:1"/></linearGradient>',$minCol,$maxColor,(defined $lir ? $lir:0),100,0,0,0,color($maxColor,$lir),color($minCol,$lir));
+  }
+  $out.= '<linearGradient id="grad_ring1stroke" x1="1" y1="0" x2="0" y2="0"><stop offset="0" style="stop-color:rgb(80,80,80); stop-opacity:0.9"/>\
+  <stop offset="1" style="stop-color:rgb(48,48,48); stop-opacity:0.9"/></linearGradient>';
   $out.='</defs>';
-  
-  $out.='<circle cx="41" cy="30" r="26.5" fill="url(#gradbackring)" />';
-  $out.='<g stroke="url(#grad_stroke3)" fill="none" stroke-width="4">';
+  $out.='<circle cx="41" cy="30" r="26.5" fill="url(#gradbackring1)" />';
+  $out.='<g stroke="url(#grad_ring1stroke)" fill="none" stroke-width="3.5">';
   $out.=describeArc(41, 30, 28, 0, 280);
   $out.='</g>';
-  $out.=sprintf('<g stroke="url(#grad_ring1_%d_%d_%d)" fill="none" stroke-width="3">',$currColor,$minColor,(defined $lr ? $lr:0));
-  $out.=describeArc(41, 30, 27.5, 0, int($prop*280));
+  if (defined $pointer) {
+    $out.='<g stroke="'.color($currColor,$lr).'" fill="none" stroke-width="3.5">';
+    $out.=describeArc(41, 30, 28, int($prop*280-$pointer/2), int($prop*280+$pointer/2));
+  } else {
+    $out.=sprintf('<g stroke="url(#grad_ring1_%d_%d_%d)" fill="none" stroke-width="2.5">',$currColor,$minColor,(defined $lr ? $lr:0));
+    $out.=describeArc(41, 30, 28, 0, int($prop*280));
+  }
   $out.='</g>';
+  
+  if (defined $innerRing and $innerRing) {
+    if (ref($func) eq "ARRAY"){
+      my $from=0;
+      my $diff=$max-$min;
+      for (my $i=0;$i<@{$func};$i+=2) {
+        my $curr=${$func}[$i];
+        my $color=${$func}[$i+1];
+        my $to=int(($curr-$min)/$diff*280);
+        $out.=sprintf('<g stroke="%s" fill="none" stroke-width="1" style="%s">',color($color,$lir),($innerRing eq "1" ? "":$innerRing));
+        $out.=describeArc(41, 30, 25.5, $from, $to);
+        $out.='</g>';
+        $from=$to+2;
+      }
+    } else {
+      $out.='</g>';
+      $out.=sprintf('<g stroke="url(#grad_ring_max_%d_%d_%d)" fill="none" stroke-width="1" opacity="0.8" style="%s">',$minCol,$maxColor,(defined $lir ? $lir:0),($innerRing eq "1" ? "":$innerRing));
+      $out.=describeArc(41, 30, 25.5, 0, 280);
+      $out.='</g>';
+    }
+  }
+ 
   if (defined $icon and $icon ne "" and  $icon ne " ") {
     my $svg_icon=::FW_makeImage($ic);
     if(!($svg_icon =~ s/\sheight="[^"]*"/ height="22"/)) {
         $svg_icon =~ s/svg/svg height="22"/ }
     if(!($svg_icon =~ s/\swidth="[^"]*"/ width="22"/)) {
         $svg_icon =~ s/svg/svg width="22"/ }
-    $out.='<g transform="translate('.$ix.', '.$iy.') translate(11, 11) scale('.$iscale.') translate(-11, -11)">';
+    $out.='<g transform="translate('.$ix.', '.$iy.') translate(11, 11) scale('.$iscale.') translate(-11, -11) rotate('.$rotate.',11,11) ">';
     $out.= $svg_icon;
     $out.='</g>';
-##    my $svg_icon=::FW_makeImage($ic);
-##    $svg_icon =~ s/height="[^"]*"/height="22"/;
-##    $svg_icon =~ s/width="[^"]*"/width="22"/;
-##  my $viewBox= ($svg_icon =~ /(viewBox="[^"]*")/) ? $1 : 'viewBox = "0 0 640 640"'; 
-##  my $viewBox='viewBox = "0 0 640 640"'; 
-##    $out.='<symbol id="Image_ring_'.$ic.'">';
-##    $out.= $svg_icon;
-##    $out.='</symbol>';
-##    $out.='<use href="#Image_ring_'.$ic.'" height="22" width="22" transform="translate('.$ix.', '.$iy.') translate(11, 11) scale('.$iscale.') translate(-11, -11)"/>';
-##    $out.='</symbol>';
   }
-  $out.= sprintf('<text text-anchor="middle" x="41" y="%s" style="fill:%s;font-size:%spx;font-weight:bold;">%s</text>',((defined ($icon) and $icon ne "") ? 43:34),color($currColor,$ln),(defined ($icon) ? 14:18),sprintf($format,$val));
-  $out.= sprintf('<text text-anchor="middle" x="41" y="%s" style="fill:%s;font-size:10px;">%s</text>',((defined ($icon) and $icon ne "") ? 53:47),color($currColor,$ln),$unit) if (defined $unit);
+  my $icflag = (defined ($icon) and $icon ne "") ? 1:0;
+  
+  my ($valInt,$valDec)=split(/\./,sprintf($format,$val));
+  if (defined $valDec) {
+      $out.= sprintf('<text text-anchor="middle" x="41" y="%s" style="fill:%s;font-size:%spx;font-weight:bold;%s">%s<tspan style="font-size:85%%;">.%s</tspan></text>',
+                     ($icflag ? 43.5:34),color($currColor,$ln),(defined ($icon) ? 14:18),$fontformat,$valInt,$valDec);
+  } else {
+    $out.= sprintf('<text text-anchor="middle" x="41" y="%s" style="fill:%s;font-size:%spx;font-weight:bold;%s">%s</text>',
+                   ($icflag ? 43.5:34),color($currColor,$ln),(defined ($icon) ? 14:18),$fontformat,$valInt);
+  }
+  $out.= sprintf('<text text-anchor="middle" x="41" y="%s" style="fill:%s;font-size:%spx;%s">%s</text>',
+                 ($icflag ? 53:47),color($currColor,$lu),($icflag ? 9:10),$unitformat,$unit) if (defined $unit);
+  
+  if (defined $minMax and $minMax) {
+    $out.= sprintf('<text text-anchor="middle" x="23" y="58" style="fill:%s;font-size:6px;%s">%s</text>',color($minCol,$lmm),($minMax eq "1" ? "":$minMax),$min);
+    $out.= sprintf('<text text-anchor="middle" x="59" y="58" style="fill:%s;font-size:6px;%s">%s</text>',color($maxColor,$lmm),($minMax eq "1" ? "":$minMax),$max);
+  }
   $out.= '</svg>';
+ 
   return ($out);
 }
 
 sub ring2
 {
-  my ($val,$min,$max,$minColor,$maxColor,$unit,$size,$func,$dec,$val2,$min2,$max2,$minColor2,$maxColor2,$unit2,$func2,$dec2,$lr,$ln) = @_;
+  my ($val,$min,$max,$minColor,$maxColor,$unit,$size,$func,$decfont,$val2,$min2,$max2,$minColor2,$maxColor2,$unit2,$func2,$decfont2,$lr,$ln,$icon) = @_;
   my $out;
   my ($format,$value);
   my ($format2,$value2);
+  
+  my ($dec,$fontformat,$unitformat);
+  ($dec,$fontformat,$unitformat)=split (/,/,$decfont) if (defined $decfont);
+  $fontformat="" if (!defined $fontformat);
+  $unitformat="" if (!defined $unitformat);
+  
+  my ($dec2,$fontformat2,$unitformat2);
+  ($dec2,$fontformat2,$unitformat2)=split (/,/,$decfont2) if (defined $decfont2);
+  $fontformat2="" if (!defined $fontformat2);
+  $unitformat2="" if (!defined $unitformat2);
+  
+   my ($ic,$iscale,$ix,$iy,$rotate)=();
+  
+  if (defined ($icon)) {
+    ($ic,$iscale,$ix,$iy,$rotate)=split(",",$icon);
+    if (defined ($ix)) {
+      $ix+=19.5;
+    } else {
+      $ix=19.5;
+    };
+    if (defined ($iy)) {
+      $iy+=22;
+    } else {
+      $iy=22;
+    };
+    $rotate=0 if (!defined $rotate);
+    $iscale=1 if (!defined $iscale);
+    $ic="" if (!defined($ic));
+  }
+  
   if (defined $lr) {
     if (!defined $ln) {
        $ln=$lr;
@@ -4767,13 +5385,15 @@ sub ring2
     $minColor=120 if (!defined $minColor);
     $maxColor=0 if (!defined $maxColor);
   }
-  $max=$value if($value>$max);
-  $min=$value if ($value<$min);
+  $value=$max if($value>$max);
+  $value=$min if ($value<$min);
   $size=100 if (!defined $size);
   
-  my $prop=($value-$min)/($max-$min);
+  my $prop=0;
+  $prop=($value-$min)/($max-$min) if ($max-$min);
+  
   my ($x1,$y1,$x2,$y2)=($prop*100,0,0,(1-$prop)*100);
-  my $val1=int($prop*100)+20;
+
   my $currColor;
   if (defined $func) {
     $currColor=&{$func}($value);
@@ -4798,12 +5418,14 @@ sub ring2
     $minColor2=120 if (!defined $minColor2);
     $maxColor2=0 if (!defined $maxColor2);
   }
-  $max2=$value2 if($value2>$max2);
-  $min2=$value2 if ($value2<$min2);
-  my $prop2=($value2-$min2)/($max2-$min2);
+  $value2=$max2 if($value2>$max2);
+  $value2=$min2 if ($value2<$min2);
+  my $prop2=0;
+  $prop2=($value2-$min2)/($max2-$min2) if ($max2-$min2);
+  
   my ($x12,$y12,$x22,$y22);
   ($x12,$y12,$x22,$y22)=($prop2*100,0,0,(1-$prop2)*100);
-  my $val12=int($prop2*100)+20;
+
   my $currColor2;
   if (defined $func2) {
    $currColor2=&{$func2}($value2);
@@ -4815,41 +5437,88 @@ sub ring2
     }
   }    
 
-  $out.= sprintf('<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 0 63 57 " style="width:%dpx; height:%dpx;">',$size/100*63,$size/100*57);
+  if (defined $icon and $icon ne "") {
+    if ($ic !~ /@/) {
+      $ic="$ic\@".color($currColor,$ln);
+    } elsif ($ic =~ /^(.*\@)colorVal1/) {
+      $ic="$1".color($currColor,$ln);
+    } elsif ($ic =~ /^(.*\@)colorVal2/) {
+      $ic="$1".color($currColor2,$ln);
+    }
+  }
+  my $width=int($size/100*63);
+  my $height=int($size/100*58);
+  $out.= sprintf('<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 0 63 58" width="%d" height="%d" style="width:%dpx; height:%dpx">',$width,$height,$width,$height);
   $out.= '<defs>';
-  $out.= '<linearGradient id="gradbackring" x1="0" y1="1" x2="0" y2="0"><stop offset="0" style="stop-color:rgb(64,64,64);stop-opacity:0.8"/><stop offset="1" style="stop-color:rgb(32, 32, 32);stop-opacity:0.9"/></linearGradient>';
+  $out.= '<linearGradient id="gradbackring2" x1="0" y1="1" x2="0" y2="0"><stop offset="0" style="stop-color:rgb(64,64,64);stop-opacity:0.9"/><stop offset="1" style="stop-color:rgb(24,24,24);stop-opacity:0.9"/></linearGradient>';
   $out.= sprintf('<linearGradient id="grad2_ring1_%d_%d_%d" x1="%d%%" y1="%d%%" x2="%d%%" y2="%d%%"><stop offset="0" style="stop-color:%s; stop-opacity:1"/>\
   <stop offset="1" style="stop-color:%s;stop-opacity:0.5"/></linearGradient>',$currColor,$minColor,(defined $lr ? $lr:0),$x1,$y1,$x2,$y2,color($currColor,$lr),color($currColor,$lr));
   
   $out.= sprintf('<linearGradient id="grad2_ring2_%d_%d_%d" x1="%d%%" y1="%d%%" x2="%d%%" y2="%d%%"><stop offset="0" style="stop-color:%s; stop-opacity:1"/>\
   <stop offset="1" style="stop-color:%s;stop-opacity:0.5"/></linearGradient>',$currColor2,$minColor2,(defined $lr ? $lr:0),$x12,$y12,$x22,$y22,color($currColor2,$lr),color($currColor2,$lr));
  
-  $out.= '<linearGradient id="grad_stroke3" x1="1" y1="0" x2="0" y2="0"><stop offset="0" style="stop-color:rgb(80,80,80); stop-opacity:0.6"/>\
-  <stop offset="1" style="stop-color:rgb(48,48,48); stop-opacity:0.8"/><linearGradient>';
+  $out.= '<linearGradient id="grad_ring2stroke" x1="1" y1="0" x2="0" y2="0"><stop offset="0" style="stop-color:rgb(80,80,80); stop-opacity:0.9"/>\
+  <stop offset="1" style="stop-color:rgb(48,48,48); stop-opacity:0.9"/></linearGradient>';
   $out.='</defs>';
   
-  $out.='<circle cx="41" cy="30" r="26.5" fill="url(#gradbackring)" />';
-  $out.='<g stroke="url(#grad_stroke3)" fill="none" stroke-width="4">';
+  $out.='<circle cx="41" cy="30" r="26.5" fill="url(#gradbackring2)" />';
+  $out.='<g stroke="url(#grad_ring2stroke)" fill="none" stroke-width="3.5">';
   $out.=describeArc(41, 30, 28, 0, 280);
   $out.='</g>';
   
   
-  $out.=sprintf('<g stroke="url(#grad2_ring1_%d_%d_%d)" fill="none" stroke-width="2">',$currColor,$minColor,(defined $lr ? $lr:0));
-  $out.=describeArc(41, 30, 28, 0, int($prop*280));
+  $out.=sprintf('<g stroke="url(#grad2_ring1_%d_%d_%d)" fill="none" stroke-width="2.3">',$currColor,$minColor,(defined $lr ? $lr:0));
+  $out.=describeArc(41, 30, 28.2, 0, int($prop*280));
   $out.='</g>';
+  
+  if (defined $icon and $icon ne "" and  $icon ne " ") {
+    my $svg_icon=::FW_makeImage($ic);
+    if(!($svg_icon =~ s/\sheight="[^"]*"/ height="16"/)) {
+        $svg_icon =~ s/svg/svg height="16"/ }
+    if(!($svg_icon =~ s/\swidth="[^"]*"/ width="16"/)) {
+        $svg_icon =~ s/svg/svg width="16"/ }
+    $out.='<g transform="translate('.$ix.', '.$iy.') translate(8, 8) scale('.$iscale.') translate(-8, -8) rotate('.$rotate.',8,8)">';
+    $out.= $svg_icon;
+    $out.='</g>';
+ }
 
+ 
   $out.=sprintf('<g stroke="url(#grad2_ring2_%d_%d_%d)" fill="none" stroke-width="2">',$currColor2,$minColor2,(defined $lr ? $lr:0));
   $out.=describeArc(41, 30, 25.5, 0, int($prop2*280));
   $out.='</g>';
-   
-  $out.= sprintf('<text text-anchor="middle" x="41" y="29" style="fill:%s;font-size:16px;font-weight:bold;">%s</text>',color($currColor,$ln),sprintf($format,$val));
-  $out.= sprintf('<text text-anchor="middle" x="41" y="16" style="fill:%s;font-size:8px;">%s</text>',color($currColor,$ln),$unit) if (defined $unit);
-  
-  $out.= sprintf('<text text-anchor="middle" x="41" y="42.5" style="fill:%s;font-size:14px;font-weight:bold;">%s</text>',color($currColor2,$ln),sprintf($format2,$val2));
-  $out.= sprintf('<text text-anchor="middle" x="41" y="49" style="fill:%s;font-size:7px;">%s</text>',color($currColor2,$ln),$unit2) if (defined $unit2);
 
+  my ($valInt,$valDec)=split(/\./,sprintf($format,$val));  
+
+  my $icflag = (defined ($icon) and $icon ne "") ? 1:0;
+
+  if (defined $valDec) {
+    $out.= sprintf('<text text-anchor="middle" x="%s" y="29" style="fill:%s;font-size:%spx;font-weight:bold;%s">%s<tspan style="font-size:85%%;">.%s</tspan></text>',
+                   ($icflag ? 50:41),color($currColor,$ln),(defined ($icon) ? 13:16),$fontformat,$valInt,$valDec);
+  } else {
+    $out.= sprintf('<text text-anchor="middle" x="%s" y="29" style="fill:%s;font-size:%spx;font-weight:bold;%s">%s</text>',
+                   ($icflag ? 50:41),color($currColor,$ln),(defined ($icon) ? 13:16),$fontformat,$valInt);
+  }
+  $out.= sprintf('<text text-anchor="middle" x="41" y="16" style="fill:%s;font-size:9px;%s">%s</text>',color($currColor,$ln),$unitformat,$unit) if (defined $unit);
+  
+  my ($valInt2,$valDec2)=split(/\./,sprintf($format2,$val2));  
+  
+  if (defined $valDec2) {
+    $out.= sprintf('<text text-anchor="middle" x="%s" y="%s" style="fill:%s;font-size:%spx;font-weight:bold;%s">%s<tspan style="font-size:85%%;">.%s</tspan></text>',
+                   ($icflag ? 50:41),($icflag ? 41:42.5),color($currColor2,$ln),(defined ($icon) ? 12:14),$fontformat2,$valInt2,$valDec2);
+  } else {
+    $out.= sprintf('<text text-anchor="middle" x="%s" y="%s" style="fill:%s;font-size:%spx;font-weight:bold;%s">%s</text>',
+                   ($icflag ? 50:41),($icflag ? 41:42.5),color($currColor2,$ln),(defined ($icon) ? 12:14),$fontformat2,$valInt2);
+  }
+  $out.= sprintf('<text text-anchor="middle" x="41" y="%s" style="fill:%s;font-size:9px;%s">%s</text>',($icflag ? 51:52),color($currColor2,$ln),$unitformat2,$unit2) if (defined $unit2);
+  
   $out.= '</svg>';
   return ($out);
+}
+
+sub dec 
+{
+  my ($format,$value)=@_;
+  return(split(/\./,sprintf($format,$value)));
 }
 
 sub y_h
@@ -4971,8 +5640,11 @@ sub cylinder_mode
   }
   
   my ($y,$val1,$null);
+  
+  my $svg_width=int($size/100*$bwidth);
+  my $svg_height=int($size/100*($bheight+40));
    
-  $out.= sprintf ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 0 %d %d" style="width:%dpx; height:%dpx;">',$bwidth,$bheight+40,$size/100*$bwidth,$size/100*($bheight+40));
+  $out.= sprintf ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 0 %d %d" width="%d" height="%d" style="width:%dpx; height:%dpx;">',$bwidth,$bheight+40,$svg_width,$svg_height,$svg_width,$svg_height);
   $out.= '<defs>';
   $out.= '<linearGradient id="grad0" x1="0" y1="0" x2="1" y2="0"><stop offset="0" style="stop-color:grey;stop-opacity:0.5"/><stop offset="1" style="stop-color:rgb(64, 64, 64);stop-opacity:0.5"/></linearGradient>';
   $out.= '<linearGradient id="grad3" x1="0" y1="0" x2="1" y2="0"><stop offset="0" style="stop-color:grey;stop-opacity:0.2"/><stop offset="1" style="stop-color:rgb(0, 0, 0);stop-opacity:0.2"/></linearGradient>';
@@ -4980,8 +5652,8 @@ sub cylinder_mode
     my $color=$values[$i+1];
     $out.= sprintf('<linearGradient id="grad1_%s" x1="0" y1="0" x2="1" y2="0"><stop offset="0" style="stop-color:%s;stop-opacity:1"/><stop offset="1" style="stop-color:%s;stop-opacity:0.3"/></linearGradient>',$color,hsl_color($color),hsl_color($color));
   }
-  $out.= '<linearGradient id="gradbackcyl" x1="0" y1="1" x2="0" y2="0"><stop offset="0" style="stop-color:rgb(32,32,32);stop-opacity:0.9"/><stop offset="1" style="stop-color:rgb(64, 64, 64);stop-opacity:0.6"/></linearGradient>';
-  $out.= '<linearGradient id="gradbackbars" x1="0" y1="1" x2="0" y2="0"><stop offset="0" style="stop-color:rgb(64,64,64);stop-opacity:0.6"/><stop offset="1" style="stop-color:rgb(32, 32, 32);stop-opacity:0.6"/></linearGradient>';
+  $out.= '<linearGradient id="gradbackcyl" x1="0" y1="1" x2="0" y2="0"><stop offset="0" style="stop-color:rgb(32,32,32);stop-opacity:0.9"/><stop offset="1" style="stop-color:rgb(64, 64, 64);stop-opacity:0.9"/></linearGradient>';
+  $out.= '<linearGradient id="gradbackbars" x1="0" y1="1" x2="0" y2="0"><stop offset="0" style="stop-color:rgb(64,64,64);stop-opacity:0.9"/><stop offset="1" style="stop-color:rgb(48, 48, 48);stop-opacity:0.9"/></linearGradient>';
 
   $out.= '</defs>';
 

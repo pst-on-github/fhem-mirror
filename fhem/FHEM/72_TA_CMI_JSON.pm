@@ -43,6 +43,7 @@ use warnings;
 sub TA_CMI_JSON_Initialize {
   my ($hash) = @_;
 
+  $hash->{SetFn}     = "TA_CMI_JSON::Set";
   $hash->{GetFn}     = "TA_CMI_JSON::Get";
   $hash->{DefFn}     = "TA_CMI_JSON::Define";
   $hash->{UndefFn}   = "TA_CMI_JSON::Undef";
@@ -50,7 +51,11 @@ sub TA_CMI_JSON_Initialize {
 #  $hash->{FW_detailFn} = "TA_CMI_JSON::DetailFn";
 #  $hash->{FW_directNotify} = "TA_CMI_JSON::DirectNotify";
 
-  $hash->{AttrList} = "username password outputStatesInterval interval readingNamesInputs readingNamesOutputs readingNamesDL-Bus readingNamesLoggingAnalog readingNamesLoggingDigital includePrettyReadings:0,1 includeUnitReadings:0,1 prettyOutputStates:0,1 " . $readingFnAttributes;
+  $hash->{AttrList} = "username password outputStatesInterval interval readingNamesInputs:textField-long ".
+                      "readingNamesOutputs:textField-long readingNamesDL-Bus:textField-long ".
+                      "readingNamesLoggingAnalog:textField-long readingNamesLoggingDigital:textField-long ".
+                      "includePrettyReadings:0,1 includeUnitReadings:0,1 prettyOutputStates:0,1 setList:textField-long ".
+                      $readingFnAttributes;
 
   Log3 '', 3, "TA_CMI_JSON - Initialize done ...";
 }
@@ -114,6 +119,12 @@ my %outputStates = (
   7 => 'Manual-On'
 );
 
+my %fixwertTypes = (
+  'fixwertAnalog' => 'D1',
+  'fixwertDigital' => '11',
+  'fixwertImpuls' => '1f'
+);
+
 ## Import der FHEM Funktionen
 BEGIN {
     GP_Import(qw(
@@ -122,10 +133,10 @@ BEGIN {
         readingsBulkUpdateIfChanged
         readingsBeginUpdate
         readingsEndUpdate
+        readingsDelete
         Log3
         HttpUtils_Close
         HttpUtils_NonblockingGet
-        CommandDeleteReading
         RemoveInternalTimer
         InternalTimer
         makeReadingName
@@ -135,7 +146,7 @@ BEGIN {
     ))
 };
 
-sub Define {
+sub Define($$) {
   my ( $hash, $def ) = @_;
   my @a = split( "[ \t][ \t]*", $def );
  
@@ -156,7 +167,11 @@ sub Define {
   $hash->{NODEID} = $nodeId;
   $hash->{QUERYPARAM} = $queryParams;
 
-  Log3 $name, 0, "TA_CMI_JSON ($name) - Define ... module=$module, CMI-URL=$cmiUrl, nodeId=$nodeId";
+  my $hexNodeId = sprintf('%1x',$nodeId);
+  $hexNodeId = "0$hexNodeId" unless length($hexNodeId) == 2;
+  $hash->{NODEID_HEX} = $hexNodeId;
+
+  Log3 $name, 3, "TA_CMI_JSON ($name) - Define ... module=$module, CMI-URL=$cmiUrl, nodeId=$nodeId";
   readingsSingleUpdate($hash, 'state', 'defined', 1);
 
   SetupIntervals($hash) if ($main::init_done);
@@ -164,7 +179,7 @@ sub Define {
   return undef;
 }
 
-sub Notify {
+sub Notify($$) {
   my ($own_hash, $dev_hash) = @_;
   my $ownName = $own_hash->{NAME}; # own name / hash
  
@@ -179,7 +194,7 @@ sub Notify {
 
 }
 
-sub SetupIntervals {
+sub SetupIntervals($) {
   my ($hash) = @_;
   my $name = $hash->{NAME};
 
@@ -200,14 +215,14 @@ sub SetupIntervals {
 
 }
 
-sub GetStatus {
+sub GetStatus($) {
   my ( $hash ) = @_;
   my $name = $hash->{NAME};
 
   PerformHttpRequest($hash);
 }
 
-sub Undef {
+sub Undef($$) {
   my ($hash, $arg) = @_; 
   my $name = $hash->{NAME};
 
@@ -217,13 +232,13 @@ sub Undef {
   return undef;
 }
 
-sub PerformHttpRequest {
-    my ($hash, $def) = @_;
+sub PerformHttpRequest($) {
+    my ($hash) = @_;
     my $name = $hash->{NAME};
     
     my $queryParam = $hash->{QUERYPARAM};
     $queryParam = '' unless defined $queryParam;
-    my $url = "http://$hash->{CMIURL}/INCLUDE/api.cgi?jsonnode=$hash->{NODEID}&jsonparam=$queryParam";
+    my $url = "http://$hash->{CMIURL}/INCLUDE/api.cgi?jsonnode=$hash->{NODEID}&jsonparam=$queryParam"."&_=".gettimeofday();
     my $username = AttrVal($name, 'username', 'admin');
     my $password = AttrVal($name, 'password', 'admin');
 
@@ -238,21 +253,22 @@ sub PerformHttpRequest {
                     callback   => \&ParseHttpResponse
                 };
 
+    Log3 $name, 4, "TA_CMI_JSON ($name) - PerformHttpRequest $url";
     HttpUtils_NonblockingGet($param);
 }
 
-sub ParseHttpResponse {
+sub ParseHttpResponse($$$) {
   my ($param, $err, $data) = @_;
   my $hash = $param->{hash};
   my $name = $hash->{NAME};
   my $return;
 
   if($err ne "") {
-      Log3 $name, 0, "error while requesting ".$param->{url}." - $err";
+      Log3 $name, 0, "TA_CMI_JSON ($name) - error while requesting ".$param->{url}." - $err";
       readingsBeginUpdate($hash);
-      readingsBulkUpdate($hash, 'state', 'ERROR', 0);
-      readingsBulkUpdate($hash, 'error', $err, 0);
-      readingsEndUpdate($hash, 0);      
+      readingsBulkUpdate($hash, 'state', 'ERROR', 1);
+      readingsBulkUpdate($hash, 'error', $err, 1);
+      readingsEndUpdate($hash, 1);      
   } elsif($data ne "") {
     my $keyValues = json2nameValue($data);
 
@@ -260,10 +276,11 @@ sub ParseHttpResponse {
     $hash->{CAN_DEVICE} = $canDevice;
     $hash->{model} = $canDevice;
     $hash->{CMI_API_VERSION} = extractVersion($keyValues->{Header_Version});
-    CommandDeleteReading(undef, "$name error");
+    readingsDelete($hash, "error");
+    readingsDelete($hash, "state");
 
     readingsBeginUpdate($hash);
-    readingsBulkUpdateIfChanged($hash, 'state', $keyValues->{Status});
+    readingsBulkUpdateIfChanged($hash, 'state', $keyValues->{Status}, 1);
     if ( $keyValues->{Status} eq 'OK' ) {
       my $queryParams = $hash->{QUERYPARAM};
       $queryParams = '' unless defined $queryParams;
@@ -310,17 +327,17 @@ sub ParseHttpResponse {
   return undef;
 }
 
-sub extractDeviceName {
+sub extractDeviceName($) {
     my ($input) = @_;
     return (defined($deviceNames{$input}) ? $deviceNames{$input} : 'unknown: ' . $input);
 }
 
-sub extractVersion {
+sub extractVersion($) {
     my ($input) = @_;
     return (defined($versions{$input}) ? $versions{$input} : 'unknown: ' . $input);
 }
 
-sub extractReadings {
+sub extractReadings($$$$) {
   my ( $hash, $keyValues, $id, $dataKey ) = @_;
   my $name = $hash->{NAME};
 
@@ -337,17 +354,17 @@ sub extractReadings {
 
     my $jsonKey = 'Data_'.$dataKey.'_'.$idx.'_Value_Value';
     my $readingValue = $keyValues->{$jsonKey};
-    Log3 $name, 5, "readingName: $readingName, key: $jsonKey, value: $readingValue";
-    readingsBulkUpdateIfChanged($hash, $readingName, $readingValue);
+    Log3 $name, 5, "TA_CMI_JSON ($name) - readingName: $readingName, key: $jsonKey, value: $readingValue";
+    readingsBulkUpdateIfChanged($hash, $readingName, $readingValue, 1);
 
     $jsonKey = 'Data_'.$dataKey.'_'.$idx.'_Value_RAS';
     my $readingRas = $keyValues->{$jsonKey};
     if (defined($readingRas)) {
-      readingsBulkUpdateIfChanged($hash, $readingName . '_RAS', $readingRas);
+      readingsBulkUpdateIfChanged($hash, $readingName . '_RAS', $readingRas, 1);
 
       if ($inclPrettyReadings) {
         my $ras = (defined($rasStates{$readingRas}) ? $rasStates{$readingRas} : undef);
-        readingsBulkUpdateIfChanged($hash, $readingName . '_RAS_Pretty', $ras) if ($ras);
+        readingsBulkUpdateIfChanged($hash, $readingName . '_RAS_Pretty', $ras, 1) if ($ras);
       }
     }
 
@@ -356,20 +373,122 @@ sub extractReadings {
       $jsonKey = 'Data_'.$dataKey.'_'.$idx.'_Value_Unit';
       my $readingUnit = $keyValues->{$jsonKey};
       $unit = (defined($units{$readingUnit}) ? $units{$readingUnit} : 'unknown: ' . $readingUnit);
-      Log3 $name, 5, "readingName: $readingName . '_Unit', key: $jsonKey, value: $readingUnit, unit: $unit";
+      Log3 $name, 5, "TA_CMI_JSON ($name) - readingName: $readingName . '_Unit', key: $jsonKey, value: $readingUnit, unit: $unit";
 
-      readingsBulkUpdateIfChanged($hash, $readingName . '_Unit', $unit) if ($inclUnitReadings);
+      readingsBulkUpdateIfChanged($hash, $readingName . '_Unit', $unit, 1) if ($inclUnitReadings);
     }
 
     if ($inclPrettyReadings) {
-      readingsBulkUpdateIfChanged($hash, $readingName . '_Pretty', $readingValue . ' ' . $unit);
+      readingsBulkUpdateIfChanged($hash, $readingName . '_Pretty', $readingValue . ' ' . $unit, 1);
     }
   }
 
   return undef;
 }
 
-sub Get {
+sub Set {
+  my ( $hash, $name, $opt, @arg) = @_;
+
+  Log3 $name, 5, "TA_CMI_JSON ($name) - Set: $name $opt ".join(' ', @arg);
+
+  my ($sets, $cmdList) = getCmdHash(AttrVal($name, 'setList', ''));
+
+  if ($opt eq 'fixwertAnalog' || $opt eq 'fixwertDigital' || $opt eq 'fixwertImpuls') {
+    my $index = $arg[0];
+    my $value = $arg[1];
+
+    my $type = $fixwertTypes{$opt};
+
+    FixwertChangeRequest($hash, $index, $value, $type);
+
+    return undef;
+  } else {
+
+    my $command = $sets->{$opt};
+
+    if (defined $command) {
+#      Log3 $name, 5, "TA_CMI_JSON ($name) -   command: $command";
+      my ($cmd, $index, $value) = split(' ', $command);
+
+#      Log3 $name, 5, "TA_CMI_JSON ($name) -   cmd: $cmd";
+#      Log3 $name, 5, "TA_CMI_JSON ($name) -   index: $index";
+#      Log3 $name, 5, "TA_CMI_JSON ($name) -   value: $value";
+#      Log3 $name, 5, "TA_CMI_JSON ($name) -   arg: ".join(' ', @arg);
+
+      unshift @arg, $value if (defined $value);
+      unshift @arg, $index if (defined $index);
+
+#      Log3 $name, 5, "TA_CMI_JSON ($name) -   arg2: ".join(' ', @arg);
+      return Set($hash, $name, $cmd, @arg);
+    }
+  }
+
+  return "Unknown argument $opt, choose one of fixwertAnalog fixwertDigital fixwertImpuls $cmdList";
+}
+
+# credits for this method go to MQTT2_DEVICE
+sub getCmdHash($)
+{
+  my ($list) = @_;
+  my (%h, @cmd);
+  map { 
+    my ($k,$v) = split(" ",$_,2);
+    push @cmd, $k;
+    $k =~ s/:.*//; # potential arguments
+    $h{$k} = $v;
+  }
+  grep /./,
+  split("\n", $list);
+  return (\%h, join(" ",@cmd));
+}
+
+sub FixwertChangeRequest($$$$) {
+    my ($hash, $index, $value, $type) = @_;
+    my $name = $hash->{NAME};
+    my $nodeId = $hash->{NODEID};
+    my $cmiIp = $hash->{CMIURL};
+    my $hexNodeId = $hash->{NODEID_HEX};
+
+    $index--; #1 on the Web UI is index 0. 2 is 1, etc.
+    my $hexIndex = sprintf('%1x',$index);
+    $hexIndex = "0$hexIndex" unless length($hexIndex) == 2;
+    
+    my $referrer = "Referer: http://$cmiIp/menupagex.cgi?nodex2=".$hexNodeId."005800";
+    my $url = "http://$cmiIp/INCLUDE/change.cgi?changeadrx2=".$hexNodeId."00".$hexIndex."4414".$type."01&changetox2=".$value."&_=".gettimeofday();
+    my $username = AttrVal($name, 'username', 'admin');
+    my $password = AttrVal($name, 'password', 'admin');
+
+    my $param = {
+                    url        => "$url",
+                    timeout    => 5,
+                    hash       => $hash,
+                    method     => "GET",
+                    header     => $referrer,
+                    user       => $username,
+                    pwd        => $password,
+                    callback   => \&FixwertChangeRequest_Callback
+                };
+
+    Log3 $name, 4, "TA_CMI_JSON ($name) - FixwertChangeRequest $url";
+    HttpUtils_NonblockingGet($param);
+}
+
+sub FixwertChangeRequest_Callback {
+my ($param, $err, $data) = @_;
+  my $hash = $param->{hash};
+  my $name = $hash->{NAME};
+
+  if($err ne "") {
+    Log3 $name, 0, "TA_CMI_JSON ($name) - error while calling ".$param->{url}." - $err";
+
+  } elsif($data ne "") {
+    Log3 $name, 5, "TA_CMI_JSON ($name) - FixwertChangeRequest_Callback: $data";
+  }
+
+  return undef;
+}
+
+sub Get($$$$) {
   my ( $hash, $name, $opt, $args ) = @_;
 
   if ("update" eq $opt) {
@@ -386,14 +505,13 @@ sub Get {
   return "Unknown argument $opt, choose one of update readOutputStates";
 }
 
-sub RequestOutputStates {
+sub RequestOutputStates($) {
     my ($hash) = @_;
     my $name = $hash->{NAME};
     my $nodeId = $hash->{NODEID};
-    my $hexNodeId = sprintf('%1x',$nodeId);
-    $hexNodeId = "0$hexNodeId" unless length($hexNodeId) == 2;
+    my $hexNodeId = $hash->{NODEID_HEX};
 
-    my $url = "http://$hash->{CMIURL}/INCLUDE/agx2.cgi?nodex2=$hexNodeId";
+    my $url = "http://$hash->{CMIURL}/INCLUDE/agx2.cgi?nodex2=$hexNodeId"."&_=".gettimeofday();
     my $username = AttrVal($name, 'username', 'admin');
     my $password = AttrVal($name, 'password', 'admin');
 
@@ -412,19 +530,21 @@ sub RequestOutputStates {
     HttpUtils_NonblockingGet($param);
 }
 
-sub ParseOutputStateResponse {
+sub ParseOutputStateResponse($$$) {
   my ($param, $err, $data) = @_;
   my $hash = $param->{hash};
   my $name = $hash->{NAME};
   my $return;
 
   if($err ne "") {
-      Log3 $name, 0, "error while requesting output data ".$param->{url}." - $err";
+      Log3 $name, 0, "TA_CMI_JSON ($name) - error while requesting output data ".$param->{url}." - $err";
       readingsBeginUpdate($hash);
       readingsBulkUpdate($hash, 'state', 'ERROR', 0);
       readingsBulkUpdate($hash, 'error', $err, 0);
-      readingsEndUpdate($hash, 0);      
+      readingsEndUpdate($hash, 1);      
   } elsif($data ne "") {
+     readingsDelete($hash, "error");
+     readingsDelete($hash, "state");
 
      my @values = split(';', $data);
      my $nrValues = @values -2;
@@ -444,15 +564,15 @@ sub ParseOutputStateResponse {
 
        $readingName = makeReadingName($readingName);
        my $readingValue = $values[$i];
-       readingsBulkUpdateIfChanged($hash, $readingName.'_State', $readingValue);
+       readingsBulkUpdateIfChanged($hash, $readingName.'_State', $readingValue, 1);
        if ($prettyOutputStates eq '1') {
          
          my $prettyValue = (defined($outputStates{$readingValue}) ? $outputStates{$readingValue} : '?:'.$readingValue);
-         readingsBulkUpdateIfChanged($hash, $readingName.'_State_Pretty', $prettyValue);
+         readingsBulkUpdateIfChanged($hash, $readingName.'_State_Pretty', $prettyValue, 1);
        }
-       Log3 $name, 5, "readingName: $readingName, readingNameIndex: $readingNameIndex, valueIndex: $i, value: $readingValue";
+       Log3 $name, 5, "TA_CMI_JSON ($name) - readingName: $readingName, readingNameIndex: $readingNameIndex, valueIndex: $i, value: $readingValue";
      }
-     readingsEndUpdate($hash, 0);
+     readingsEndUpdate($hash, 1);
 
      Log3 $name, 5, "TA_CMI_JSON ($name) - Output Data $nrValues: $data";
   }
@@ -467,97 +587,6 @@ sub ParseOutputStateResponse {
 
   return undef;
 }
-
-my $counter = 0;
-
-sub DetailFn {
-  my $css = '<style>
-#headag{
-	float:left;
-	border-right:solid 1px black;
-	cursor:pointer;
-}
-.headag{
-	color:grey;
-	padding-bottom:4px;
-	display:inline-block;
-	min-width:11px;
-	position:relative;
-}
-.agmisch{
-	display:inline;
-	font-size:0.8em;
-	margin-right:-0.3em;
-	position:relative;
-	width:0;
-}
-.headagshow{
-	color:black;
-}
-.headag > .hand{
-	width:100%;
-	position:absolute;
-	left:0px;
-	bottom:0px;
-	height:8px;
-}
-.hand img{
-	margin-left:auto;
-	margin-right:auto;
-	display:block;
-	width:11px;
-	height:7px;
-}
-.headagshow.hand{
-	background:url("../images/hand.png") no-repeat scroll 0px 19px / 9px 5px;
-}
-.headagshow.on{
-	background:#00f000;
-	border:#000 solid 1px;
-	border-radius:2px;
-}
-.headagshow.hand.on{
-	background:#00f000 url("../images/hand.png") no-repeat scroll 0 19px / 9px 5px;
-}
-.headag.headagshow.dom{
-	border:1px solid red;
-	border-radius:2px;
-}
-</style>';
-
-
-my $html = '
-<div id="headag" fadresse="10045800">
-<span id="headag1" class="headag headagshow">1</span>
-<span id="headag2" class="headag headagshow">2</span>
-<span id="headag3" class="headag headagshow">3</span>
-<span id="headag4" class="headag">'.$counter.'</span>
-<span id="headag5" class="headag headagshow">5</span>
-<span id="headag6" class="headag headagshow">6</span>
-<span id="headag7" class="headag headagshow on">7</span>
-<span id="headag8" class="headag headagshow">8</span>
-<span id="headag9" class="headag headagshow on">9</span>
-<span id="headag10" class="headag headagshow on">10</span>
-<span id="headag11" class="headag">11</span>
-<span id="headag12" class="headag headagshow">12</span>
-<span id="headag13" class="headag headagshow">13</span>
-<span id="headag14" class="headag">14</span>
-<span id="headag15" class="headag">15</span>
-<span id="headag16" class="headag">16</span>
-</div>
-';
-
-$counter++;
-
-#InternalTimer( gettimeofday() + $hash->{INTERVAL}, $functionName, $hash, 0 );
-
-  return $css.$html;
-}
-
-#sub DirectNotify {
-#  my ($filter,$fhemweb_instance,
-#}
-
 
 # Eval-Rückgabewert für erfolgreiches
 # Laden des Moduls
@@ -593,7 +622,21 @@ $counter++;
   </ul>
   <br><br>
   
-    <a name="TA_CMI_JSONget"></a>
+  <a name="TA_CMI_JSONset"></a>
+  <b>Set</b>
+  <ul>
+    <li><code>fixwertAnalog</code><br>Set Fixwert to an analog value. Example:<br>
+    <ul><code>set cmiNode fixwertAnalog &lt;index&gt; &lt;value&gt;<br>set cmiNode fixwertAnalog 3 64.0</code> will set Fixwert 3 to 64.0</ul>
+    </li>
+    <li><code>fixwertDigital</code><br>Set Fixwert to a digital value. Also works for impulse values. Example:<br>
+    <ul><code>set cmiNode fixwertDigital &lt;index&gt; &lt;value&gt;<br>set cmiNode fixwertDigital 2 1</code> will set Fixwert 2 to On/Yes.</ul>
+    </li>
+    <li><code>fixwertImpuls</code><br>Trigger an impulse to Fixwert. Example:<br>
+    <ul><code>set cmiNode fixwertImpuls &lt;index&gt; &lt;value&gt;<br>set cmiNode fixwertImpuls 3 1</code> will send an On-impulse to Fixwert 3.</ul>
+    </li>
+  </ul>
+
+  <a name="TA_CMI_JSONget"></a>
   <b>Get</b>
   <ul>
     <li><code>update</code><br>Triggers querying of values from the CMI. Please note that the request rate is limited to one query per minute.
@@ -617,6 +660,11 @@ $counter++;
     <li><code>interval</code><br>Query interval in seconds. Minimum query interval is 60 seconds.</li>
     <li><code>outputStatesInterval</code><br>Request interval in seconds for getting output states.</li>
     <li><code>prettyOutputStates [0:1]</code><br>If set, generates a reading _State_Pretty for output states (eg Auto-On, Manual-Off)</li>
+    <li>
+      <code>setList</code><br>Used to define Set shortcuts for fixwertAnalog, Digital, and Impuls. eg <code>Light_on:noArg fixwertImpuls 3 1</code><br>
+      The second parameter (for the value) can be left out and directly read from the input field. eg <code>Water_Temperature fixwertAnalog 7</code><br>
+      can be used like <code>set cmiNode Water_Temperature 55.0</code>.
+    </li>
     <li><code>username</code><br>Username for querying the JSON-API. Needs to be either admin or user privilege.</li>
     <li><code>password</code><br>Password for querying the JSON-API.</li>
     
@@ -653,7 +701,21 @@ Weitere Informationen zu diesem Modul im <a href="https://wiki.fhem.de/wiki/UVR1
   </ul>
   <br><br>
   
-    <a name="TA_CMI_JSONget"></a>
+  <a name="TA_CMI_JSONset"></a>
+  <b>Set</b>
+  <ul>
+    <li><code>fixwertAnalog</code><br>Setzt einen Fixwert auf einen analogen Wert. Beispiel:<br>
+    <ul><code>set cmiNode fixwertAnalog &lt;index&gt; &lt;value&gt;<br>set cmiNode fixwertAnalog 3 64.0</code>setzt Fixwert 3 auf 64.0</ul>
+    </li>
+    <li><code>fixwertDigital</code><br>Setzt einen Fixwert auf einen digitalen Wert. Funktioniert auch für Impulse. Beispiel:<br>
+    <ul><code>set cmiNode fixwertDigital &lt;index&gt; &lt;value&gt;<br>set cmiNode fixwertDigital 2 1</code> setzt Fixwert 2 auf Ein/Ja</ul>
+    </li>
+    <li><code>fixwertImpuls</code><br>Sendet einen Impuls an den Fixwert. Beispiel:<br>
+    <ul><code>set cmiNode fixwertImpuls &lt;index&gt; &lt;value&gt;<br>set cmiNode fixwertImpuls 3 1</code> sendet einen Ein-Impuls nach Fixwert 3.</ul>
+    </li>
+  </ul>
+
+  <a name="TA_CMI_JSONget"></a>
   <b>Get</b>
   <ul>
     <li><code>update</code><br>Hiermit kann sofort eine Abfrage der API ausgef&uuml;hrt werden. Das Limit von einer Anfrage pro Minute besteht trotzdem.
@@ -677,6 +739,11 @@ Weitere Informationen zu diesem Modul im <a href="https://wiki.fhem.de/wiki/UVR1
     <li><code>interval</code><br>Abfrage-Intervall in Sekunden. Muss mindestens 60 sein.</li>
     <li><code>outputStatesInterval</code><br>Abfrage-Intervall für Ausgangs-Stati in Sekunden.</li>
     <li><code>prettyOutputStates [0:1]</code><br>Definiert, ob zu einem Ausgangs-Status ein zusätzliches Reading _State_Pretty geschrieben werden soll (liefert zB Auto-On, Manual-Off)</li>
+    <li>
+      <code>setList</code><br>Dienst zum Anlegen direkter Set Befehle für fixwertAnalog, Digital, und Impuls. zB <code>Licht_ein:noArg fixwertImpuls 3 1</code><br>
+      Wird der zweite Parameter (der Wert) weggelassen, kann dieser direkt aus dem Textfeld übernommen werden. zB <code>Wasser_Temperatur fixwertAnalog 7</code><br>
+      könnte dann mit <code>set cmiNode Wasser_Temperatur 55.0</code> verwendet werden.
+    </li>
     <li><code>username</code><br>Username zur Abfrage der JSON-API. Muss die Berechtigungsstufe admin oder user haben.</li>
     <li><code>password</code><br>Passwort zur Abfrage der JSON-API.</li>
   </ul>

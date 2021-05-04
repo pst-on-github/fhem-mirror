@@ -192,7 +192,7 @@ DevIo_DecodeWS($$)
     $i += 2;
   } elsif( $len == 127 ) {
     return "" if(length($data) < 10);
-    $len = unpack( 'q', substr($hash->{".WSBUF"},$i,8) );
+    $len = unpack( 'Q>', substr($hash->{".WSBUF"},$i,8) );
     $i += 8;
   }
 
@@ -413,7 +413,8 @@ DevIo_OpenDev($$$;$)
   }
 
   $hash->{PARTIAL} = "";
-  Log3 $name, 3, ($hash->{DevioText} ? $hash->{DevioText} : "Opening").
+  my $l = $hash->{devioLoglevel}; # Forum #61970
+  Log3 $name, ($l ? $l:3), ($hash->{DevioText} ? $hash->{DevioText} : "Opening").
        " $name device ". (AttrVal($name,"privacy",0) ? "(private)" : $dev)
        if(!$reopen);
 

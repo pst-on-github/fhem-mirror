@@ -260,7 +260,7 @@ FHEM/46_TRX_WEATHER.pm       KernSani             RFXTRX
 FHEM/47_OBIS.pm              gvzdus               Sonstige Systeme
 FHEM/48_MieleAtHome.pm       choenig              Sonstige Systeme
 FHEM/49_Arlo.pm              maluk                Sonstige Systeme
-FHEM/49_IPCAM.pm             mfr69bs              Sonstiges
+FHEM/49_IPCAM.pm             delmar               Sonstiges
 FHEM/49_SSCam.pm             DS_Starter           Sonstiges
 FHEM/49_SSCamSTRM.pm         DS_Starter           Sonstiges
 FHEM/49_TBot_List.pm         viegener             Unterstützende Dienste
@@ -329,6 +329,7 @@ FHEM/66_EseraOneWire.pm      pizmus               1Wire
 FHEM/66_EseraShutter.pm      pizmus               1Wire
 FHEM/66_EseraTemp.pm         pizmus               1Wire
 FHEM/67_ECMDDevice.pm        neubert              Sonstige Systeme
+FHEM/_69_SoftliqCloud.pm     KernSani             Unterstützende Dienste
 FHEM/70_BOTVAC.pm            vuffiraa             Sonstige Systeme
 FHEM/70_BRAVIA.pm            vuffiraa             Multimedia
 FHEM/70_CanOverEthernet.pm   delmar               Sonstige Systeme
@@ -503,6 +504,7 @@ FHEM/98_IF.pm                damian-s             Automatisierung
 FHEM/98_inotify.pm           marvin78             Automatisierung
 FHEM/98_Installer.pm         loredo               Unterstützende Dienste
 FHEM/98_JsonList2.pm         rudolfkoenig         Automatisierung
+FHEM/98_JsonMod.pm           herrmannj            Automatisierung
 FHEM/98_livetracking.pm      markus-m             Unterstützende Dienste
 FHEM/98_logProxy.pm          justme1968           Frontends/SVG Plots logProxy
 FHEM/98_search.pm            loredo               Unterstützende Dienste
@@ -590,7 +592,7 @@ FHEM/lib/*deviceconfig.xml.gz        krikan       ZWave
 FHEM/lib/*manufacturer_specific.xml  krikan       ZWave
 FHEM/lib/AttrTemplate/huedevice.template Shojo    https://forum.fhem.de/index.php/topic,101829.html
 FHEM/lib/AttrTemplate/httpmod.template amenomade  https://forum.fhem.de/index.php/topic,97694.0.html
-FHEM/lib/AttrTemplate/mqtt2.template Beta-User    https://forum.fhem.de/index.php/topic,94494.0.html
+FHEM/lib/AttrTemplate/mqtt2.template Beta-User/Otto123    https://forum.fhem.de/index.php/topic,94494.0.html
 FHEM/lib/AttrTemplate/mysensors.template Beta-User Bastelecke/MySensors
 FHEM/lib/Device/Firmata/*    jensb                Sonstige Systeme
 FHEM/lib/Device/MySensors/*  Beta-User            Bastelecke/MySensors
@@ -617,6 +619,7 @@ contrib/97_SprinkleControl.pm Tobias              Unterstützende Dienste
 contrib/98_Sprinkle.pm       Tobias               Unterstützende Dienste
 contrib/betateilchen/*       betateilchen         Sonstiges
 contrib/AttrTemplate/*       Beta-User            (depends on attrTemplate)
+contrib/AttrTemplate/99_sonos2mqttUtils.pm Otto123 https://forum.fhem.de/index.php/topic,111711
 contrib/commandref*          rudolfkoenig         Sonstiges
 contrib/pre-commit           rudolfkoenig         Sonstiges
 contrib/DEBIAN/*             betateilchen         Sonstiges

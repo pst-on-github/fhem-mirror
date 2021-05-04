@@ -23,7 +23,6 @@
 #   Todo:       
 #               setXYHintExpression zum dynamischen Ändern / Erweitern der Hints
 #               extractAllReadings mit Filter / Prefix
-#               get after set um readings zu aktualisieren
 #               definierbarer prefix oder Suffix für Readingsnamen wenn sie von unterschiedlichen gets über readingXY erzeugt werden
 #               reading mit Status je get (error, no match, ...) oder reading zum nachverfolgen der schritte, fehler, auth etc.
 #
@@ -141,16 +140,16 @@ BEGIN {
     ));
 };
 
-my $Module_Version = '4.1.02 - 4.2.2021';
+my $Module_Version = '4.1.08 - 1.4.2021';
 
 my $AttrList = join (' ', 
       '(reading|get|set)[0-9]+(-[0-9]+)?Name', 
-      '(reading|get|set)[0-9]*(-[0-9]+)?Expr',
+      '(reading|get|set)[0-9]*(-[0-9]+)?Expr:textField-long',
       '(reading|get|set)[0-9]*(-[0-9]+)?Map', 
-      '(reading|get|set)[0-9]*(-[0-9]+)?OExpr',
-      '(reading|get|set)[0-9]*(-[0-9]+)?OMap',
-      '(get|set)[0-9]*(-[0-9]+)?IExpr',
-      '(get|set)[0-9]*(-[0-9]+)?IMap', 
+      '(reading|get|set)[0-9]*(-[0-9]+)?OExpr:textField-long',
+      '(reading|get|set)[0-9]*(-[0-9]+)?OMap:textField-long',
+      '(get|set)[0-9]*(-[0-9]+)?IExpr:textField-long',
+      '(get|set)[0-9]*(-[0-9]+)?IMap:textField-long', 
       '(reading|get|set)[0-9]*(-[0-9]+)?Format', 
       '(reading|get|set)[0-9]*(-[0-9]+)?Decode', 
       '(reading|get|set)[0-9]*(-[0-9]+)?Encode', 
@@ -162,7 +161,7 @@ my $AttrList = join (' ',
       '(reading|get|set)[0-9]+XPath', 
       '(reading|get|set)[0-9]+XPath-Strict', 
       '(reading|get|set)[0-9]+JSON', 
-      '(reading|get|set)[0-9]*RecombineExpr',
+      '(reading|get|set)[0-9]*RecombineExpr:textField-long',
       '(reading|get|set)[0-9]*AutoNumLen',
       '(reading|get|set)[0-9]*AlwaysNum',
       '(reading|get|set)[0-9]*DeleteIfUnmatched',
@@ -173,7 +172,7 @@ my $AttrList = join (' ',
       'readingsRegex.*',              # old 
       'readingsExpr.*',               # old 
       'requestHeader.*',  
-      'requestData.*',
+      'requestData.*:textField-long',
       'noShutdown:0,1',    
       'httpVersion',
       'sslVersion',
@@ -189,17 +188,17 @@ my $AttrList = join (' ',
       'preProcessRegex',
       'parseFunction1',
       'parseFunction2',
-      'set[0-9]+Temp',
+      'set[0-9]+Local',               # don't create a request and just set a reading
       '[gs]et[0-9]*URL',
-      '[gs]et[0-9]*Data.*',
+      '[gs]et[0-9]*Data.*:textField-long',
       '[gs]et[0-9]*NoData.*',         # make sure it is an HTTP GET without data - even if a more generic data is defined
-      '[gs]et[0-9]*Header.*',
+      '[gs]et[0-9]*Header.*:textField-long',
       '[gs]et[0-9]*CheckAllReadings:0,1',
       '[gs]et[0-9]*ExtractAllJSON:0,1,2',
       
-      '[gs]et[0-9]*URLExpr',          # old
-      '[gs]et[0-9]*DatExpr',          # old
-      '[gs]et[0-9]*HdrExpr',          # old
+      '[gs]et[0-9]*URLExpr:textField-long',          # old
+      '[gs]et[0-9]*DatExpr:textField-long',          # old
+      '[gs]et[0-9]*HdrExpr:textField-long',          # old
 
       'get[0-9]*Poll:0,1', 
       'get[0-9]*PollDelay',
@@ -236,7 +235,7 @@ my $AttrList = join (' ',
         
       'sid[0-9]*URL',
       'sid[0-9]*Header.*',
-      'sid[0-9]*Data.*',
+      'sid[0-9]*Data.*:textField-long',
       'sid[0-9]*IgnoreRedirects:0,1',      
       'sid[0-9]*ParseResponse:0,1',           # parse response as if it was a get
       'clearSIdBeforeAuth:0,1',
@@ -247,8 +246,8 @@ my $AttrList = join (' ',
       
       'replacement[0-9]+Regex',
       'replacement[0-9]+Mode:reading,internal,text,expression,key',   # defaults to text
-      'replacement[0-9]+Value',                                   # device:reading, device:internal, text, replacement expression
-      '[gs]et[0-9]*Replacement[0-9]+Value',                       # can overwrite a global replacement value - todo: auch für auth?
+      'replacement[0-9]+Value:textField-long',                        # device:reading, device:internal, text, replacement expression
+      '[gs]et[0-9]*Replacement[0-9]+Value:textField-long',            # can overwrite a global replacement value - todo: auch für auth?
       
       'do_not_notify:1,0', 
       'disable:0,1',
@@ -434,7 +433,7 @@ sub AttrFn {
     my $cmd   = shift;                  # 'set' or 'del'
     my $name  = shift;                  # the Fhem device name
     my $aName = shift;                  # attribute name
-    my $aVal  = shift;                  # attribute value
+    my $aVal  = shift // '';            # attribute value
     my $hash  = $defs{$name};           # reference to the Fhem device hash
     
     Log3 $name, 5, "$name: attr $name $aName $aVal";
@@ -661,7 +660,7 @@ sub UpgradeAttributes {
         if ($aName =~ /(.+)IDRegex$/) {
             my $new = $1 . "IdRegex";
             my $val = $attr{$name}{$aName};
-            CommandAttr(undef, "$name $new $val");          # also adds new attr to userattr list through _Attr function
+            CommandAttr(undef, "$name $new $val");
             CommandDeleteAttr(undef, "$name $aName");
             $dHash{$aName} = 1;
             Log3 $name, 3, "$name: upgraded attribute name $aName to new sytax $new";
@@ -942,8 +941,8 @@ sub PrepareRequest {
     }
     #Log3 $name, 5, "$name: PrepareRequest got url $url, header $header and data $data";
     $header = EvalExpr($hash, {expr => GetFAttr($name, $context, $num, "HdrExpr"), val => $header, action => 'HdrExpr'});
-    $data   = EvalExpr($hash, {expr => GetFAttr($name, $context, $num, "DatExpr"), val => $data, action => 'DatExpr'});
-    $url    = EvalExpr($hash, {expr => GetFAttr($name, $context, $num, "URLExpr"), val => $url, action => 'URLExpr'});
+    $data   = EvalExpr($hash, {expr => GetFAttr($name, $context, $num, "DatExpr"), val => $data,   action => 'DatExpr'});
+    $url    = EvalExpr($hash, {expr => GetFAttr($name, $context, $num, "URLExpr"), val => $url,    action => 'URLExpr'});
 
     my $type;
     if ($context eq 'reading') {
@@ -1254,7 +1253,7 @@ sub SetFn {
         $rawVal = 0;
         Log3 $name, 4, "$name: set will now set $setName";
     }
-    if (!AttrVal($name, "set${setNum}Temp", undef)) {      # soll überhaupt ein Request erzeugt werden?
+    if (!AttrVal($name, "set${setNum}Local", undef)) {              # soll überhaupt ein Request erzeugt werden?
         my $request = PrepareRequest($hash, "set", $setNum);
         if ($request->{'url'}) {
             DoAuth $hash if (AttrVal($name, "reAuthAlways", 0));
@@ -1265,7 +1264,7 @@ sub SetFn {
             Log3 $name, 3, "$name: no URL for set $setNum";
         }
     } else {
-        readingsSingleUpdate($hash, makeReadingName($setName), $rawVal, 0);
+        readingsSingleUpdate($hash, makeReadingName($setName), $rawVal, 1);
     }
     ChainGet($hash, 'set', $setNum);
     return;
@@ -1479,10 +1478,11 @@ sub FormatReading {
     $expr    = GetFAttr($name, $context, $num, "Expr", $expr) if ($context ne "set");   # not for set!
     $expr    = GetFAttr($name, $context, $num, "OExpr", $expr);                         # new syntax
     
-    # if no encode is specified and bodyDecode did decode, then encode as utf8 by default
-    #my $fDefault   = ($featurelevel > 5.9 ? 'auto' : '');
-    my $bodyDecode = AttrVal($name, 'bodyDecode', '');
-    $encode = 'utf8' if (!$encode && $bodyDecode ne 'none');
+    # encode as utf8 by default if no encode is specified and body was decoded or no charset was seen in the header 
+    if (!$encode && (!$hash->{'.bodyCharset'} || $hash->{'.bodyCharset'} eq 'internal' )) {   # body was decoded and encode not sepcified
+        $encode = 'utf8';
+        Log3 $name, 5, "$name: FormatReading is encoding the reading value as utf-8 because no encoding was specified and the response body charset was unknown or decoded";
+    }
 
     $val = decode($decode, $val) if ($decode && $decode ne 'none');
     $val = encode($encode, $val) if ($encode && $encode ne 'none');
@@ -2276,7 +2276,7 @@ sub DumpBuffer {
     my $fh;
     $hash->{BufCounter} = 0 if (!$hash->{BufCounter});
     $hash->{BufCounter} ++;
-    my $path = AttrVal($name, "dumpBuffers", 0);
+    my $path = AttrVal($name, "dumpBuffers", '.');
     Log3 $name, 3, "$name: dump buffer to $path/buffer$hash->{BufCounter}.txt";
     open($fh, '>', "$path/buffer$hash->{BufCounter}.txt");      ## no critic 
     if ($header) {
@@ -2512,20 +2512,21 @@ sub FillHttpUtilsHash {
 
     # do user defined replacements first
     if ( $hash->{'.ReplacementEnabled'} ) {
-        $huHash->{header} = DoReplacement($hash, $request->{type}, $huHash->{header} );
-        $huHash->{data}   = DoReplacement($hash, $request->{type}, $huHash->{data} );
+        $huHash->{header} = DoReplacement($hash, $request->{type}, $huHash->{header} ) if ($huHash->{header});
+        $huHash->{data}   = DoReplacement($hash, $request->{type}, $huHash->{data} )   if ($huHash->{data});
         $huHash->{url}    = DoReplacement($hash, $request->{type}, $huHash->{url} );
     }
 
     # then replace $val in header, data and URL with value from request (setVal) if it is still there
-    $huHash->{header} =~ s/\$val/$request->{value}/g;
-    $huHash->{data}   =~ s/\$val/$request->{value}/g;
-    $huHash->{url}    =~ s/\$val/$request->{value}/g;
+    my $value = $request->{value} // '';
+    $huHash->{header} =~ s/\$val/$value/g if ($huHash->{header});
+    $huHash->{data}   =~ s/\$val/$value/g if ($huHash->{data});;
+    $huHash->{url}    =~ s/\$val/$value/g;
 
     # sid replacement is also done here - just before sending so changes in session while request was queued will be reflected
     if ( $hash->{sid} ) {
-        $huHash->{header} =~ s/\$sid/$hash->{sid}/g;
-        $huHash->{data}   =~ s/\$sid/$hash->{sid}/g;
+        $huHash->{header} =~ s/\$sid/$hash->{sid}/g if ($huHash->{header});
+        $huHash->{data}   =~ s/\$sid/$hash->{sid}/g if ($huHash->{data});
         $huHash->{url}    =~ s/\$sid/$hash->{sid}/g;
     }
 
@@ -2634,6 +2635,9 @@ sub AddToSendQueue {
 
     $request->{retryCount}      = 0 if (!$request->{retryCount});
     $request->{ignoreredirects} = 0 if (!$request->{ignoreredirects});
+    $request->{context}         = 'unknown' if (!$request->{context});
+    $request->{type}            = 'unknown' if (!$request->{type});
+    $request->{num}             = 'unknown' if (!$request->{num});
     
     my $qlen = ($hash->{QUEUE} ? scalar(@{$hash->{QUEUE}}) : 0);
     #Log3 $name, 4, "$name: AddToQueue adds $request->{type}, initial queue len: $qlen" . ($request->{'priority'} ? ", priority" : "");
@@ -2737,7 +2741,7 @@ sub AddToSendQueue {
             attr PM reading02Name CL<br>
             attr PM reading02Regex 34.4008.value":[ \t]+"([\d\.]+)"<br>
             <br>
-            attr PM reading03Name3TEMP<br>
+            attr PM reading03Name TEMP<br>
             attr PM reading03Regex 34.4033.value":[ \t]+"([\d\.]+)"<br>
             <br>
             attr PM requestData {"get" :["34.4001.value" ,"34.4008.value" ,"34.4033.value", "14.16601.value", "14.16602.value"]}<br>
@@ -3469,6 +3473,8 @@ sub AddToSendQueue {
             Defines that this set option doesn't require arguments. It allows sets like "on" or "off" without further values.
         <li><b>set[0-9]*ParseResponse</b></li>
             defines that the HTTP response to the set will be parsed as if it was the response to a get command.
+        <li><b>set[0-9]*Local</b></li>
+            defines that no HTTP request will be sent. Instead the value is directly set as a reading value.
         <br>
 
         <li><b>(get|set)[0-9]*HdrExpr</b></li>
@@ -3639,7 +3645,10 @@ sub AddToSendQueue {
             restricts the effect of errorLogLevel to such error messages that match this regex.
 
         <li><b>Remarks regarding the automatically created userattr entries</b></li>
-            Fhemweb allows attributes to be edited by clicking on them. However this does not work for attributes that match to a wildcard attribute. To circumvent this restriction HTTPMOD automatically adds an entry for each instance of a defined wildcard attribute to the device userattr list. E.g. if you define a reading[0-9]Name attribute as reading01Name, HTTPMOD will add reading01Name to the device userattr list. These entries only have the purpose of making editing in Fhemweb easier.
+            Fhemweb allows attributes to be edited by clicking on them. However this did not work for attributes that match to a wildcard attribute in earlier versions. 
+            To circumvent this restriction HTTPMOD automatically added an entry for each instance of a defined wildcard attribute to the device userattr list. 
+            E.g. if you define a reading[0-9]Name attribute as reading01Name, HTTPMOD added reading01Name to the device userattr list. 
+            These entries only had the purpose of making editing in Fhemweb easier. In newer versions this has become obsolete.
     </ul>
     <br>
     <b>Author's notes</b><br><br>

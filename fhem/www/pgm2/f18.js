@@ -125,7 +125,7 @@ f18_tables()
 
   $("#content .devType").each(function(){
     var el = this, grp = $(el).text();
-    f18_addPin(el, "Room."+FW_urlParams.room+".grp."+grp, true,
+    f18_addPin(el, "Room."+f18_room+".grp."+grp, true,
     function(isFixed){
       var ntr = $(el).closest("tr").next("tr");
       isFixed ? $(ntr).show() : $(ntr).hide();
@@ -735,7 +735,7 @@ f18_setCss(why)
   function bg(c) { return "{ background:#"+c+"; fill:#"+c+"; }\n" }
   function fg(c) { return "{ color:#"+c+"; }\n" }
   style += ".col_fg, body, input, textarea "+fg(col("fg"));
-  style += ".col_bg, textarea, input, option "+bg(col("bg"));
+  style += ".col_bg, textarea, input, option, optgroup "+bg(col("bg"));
   style += ".col_link,a:not(.changed),.handle,.fhemlog,input[type=submit],"+
            "select,div.ui-widget-content a "+
            "{color:#"+col("link")+"!important; stroke:#"+col("link")+";}\n";

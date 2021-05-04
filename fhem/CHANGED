@@ -1,5 +1,69 @@
 # Add changes at the top of the list. Keep it in ASCII, and 80-char wide.
 # Do not insert empty lines here, update check depends on it.
+ - bugfix:  10_WS980: v1.3.0 - fix invalid values like 0xffff
+ - bugfix:  73_AutoShuttersControl: roolback fix #1149463
+ - bugfix:  73_AutoShuttersControl: fix logic error in EventProcessing 
+                         Forum #1149463
+ - bugfix:  74_GardenaSmartDevice: fix uninitialized value in concatenation
+ - feature: 98_backup: split modul code in to two files. add code for
+                       error handling
+ - bugfix:  lib/FHEM/Core/Authentication/Passwords.pm:
+            fix rename bug, new method to create object
+          You musst pass a instance TYPE to the function if you create a objekt
+ - change:  move lib/FHEM/Core/Password/Utils.pm to
+            lib/FHEM/Core/Authentication/Passwords.pm
+ - feature: 30_HUEBridge: enable autocreation of sensors for deconz
+ - new:     lib/FHEM/Core/Password/Utils.pm: new modul for developer to save
+            passwords or passphrase in fhem keystore
+ - bugfix:  98_WeekdayTimer: don't enable disabled WDT in group par. setting
+ - feature: 49_IPCAM: attrs unknownFormatRetryCount, unknownFormatRetryDelay
+                      and handleAnyXmlAsSvg
+ - change:  74_GardenaDevice: add new API for mower
+ - bugfix:  70_BOTVAC: transient map cache
+ - bugfix:  73_DoorBird: Event Video Routine
+ - bugfix:  73_ElectricityCalculator: Bugfix - Midnight-Crash
+ - bugfix:  73_WaterCalculator:       Bugfix - Midnight-Crash
+ - bugfix:  73_GasCalculator:         Bugfix - Midnight-Crash
+ - bugfix:  70_BRAVIA: fix registration renewal
+ - change:  49_IPCAM: imageWithCallback wrapped in internalTimer with 0 delay
+ - bugfix:  47_OBIS: Reintegrate buggy DZG meters support
+ - change:  49_IPCAM: introduced attribute httpTimeout
+ - change:  49_IPCAM: introduced incrementalTimeout
+ - feature: 93_DbLog: new attributes SQLiteCacheSize, SQLiteJournalMode
+ - bugfix:  98_Text2Speech.pm: some Improvements by Mirko
+ - change:  73_GardenaSmartBridge: Change part of code for new API
+ - bugfix:  47_OBIS: fixed bug with 64 bit integer numbers
+ - change:  46_TeslaPowerwall2AC: Code rewrite for new Auth API and
+                                  modul structure
+ - new:     69_SoftliqCloud: New Module
+ - change:  47_OBIS: more robustness for changing polltime / interval
+ - feature: 72_TA_CMI_JSON: added internal NODEID_HEX
+ - change:  48_BlinkCamera: Support for SMS Pins in verifyPin 
+ - feature: 72_TA_CMI_JSON: added set fixwertImpuls and setList
+ - feature: 72_TA_CMI_JSON: added set fixwertAnalog fixwertDigital
+ - change:  70_ZoneMinder: made Crypt dependency for v 1.30 optional
+ - change:  48_BlinkCamera: Change to new Blink login API / add resetUniqueID
+ - change:  47_OBIS: redesign of parser (major change)
+ - bugfix:  57_Calendar: avoid spurious re-creation of all events
+ - bugfix:  49_IPCAM: not sending events for sequential snapshots fixed
+ - new:     SYSSTAT: umstellung auf non-blocking
+                     frei konfigurierbare zusatz readings
+                     mehr siehe: https://forum.fhem.de/index.php?topic=42771
+ - new:     49_IPCAM: set-magic for POST data (eg resolving [device:reading]) 
+ - new:     49_IPCAM: added POST for custom commands cmd01-cmd15 
+ - new:     49_IPCAM: imageWithCallback now also interprets [device:reading]
+ - bugfix:  49_IPCAM: fixed imageWithCallback using previous image 
+ - change:  49_IPCAM: added 'get imageWithCallback'
+ - change:  49_IPCAM: now unblocking and removed attribute 'loglevel'
+ - change:  76_SMAInverter: change the etoday management
+ - change:  48_MieleAtHome: add readings to show token-refresh-count
+ - change:  93_DbRep: attribute sqlCmdVars is now working with sqlCmdBlocking
+ - feature: 93_DbLog: new attr cacheOverflowThreshold
+ - feature: 93_Log2Syslog: don't use CRLF as end of data packet if EOF is used
+ - feature: 49_IPCAM: added templates, improved logging
+ - feature: 73_DoorBird: Maximum Size of files stored for Image, Video & Audio
+ - bugfix:  49_SSCam: solve JS error, remove sscam_tooltip.js
+ - bugfix:  55_DWD_OpenData: no smartmatch warning (forum #118669)
  - bugfix:  70_BOTVAC: commandref anker point style <module><get|set|attr>
  - feature: 72_TA_CMI_JSON: added readOutputStates and according attributes
  - feature: 73_km200: Errorcodes implemented

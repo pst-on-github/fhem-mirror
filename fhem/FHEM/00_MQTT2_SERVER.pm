@@ -324,6 +324,10 @@ MQTT2_SERVER_Read($@)
   ####################################
   if($cpt eq "CONNECT") {
     # V3:MQIsdb V4:MQTT
+    if(ord($fb) & 0xf) { # lower nibble must be zero
+      Log3 $sname, 3, "$cname with bogus CONNECT (".ord($fb)."), disconnecting";
+      return CommandDelete(undef, $cname);
+    }
     ($hash->{protoTxt}, $off) = MQTT2_SERVER_getStr($hash, $pl, 0);
     $hash->{protoNum}  = unpack('C*', substr($pl,$off++,1)); # 3 or 4
     $hash->{cflags}    = unpack('C*', substr($pl,$off++,1));
@@ -613,7 +617,7 @@ MQTT2_SERVER_ReadDebug($$)
 =item summary_DE Standalone MQTT message broker
 =begin html
 
-<a name="MQTT2_SERVER"></a>
+<a id="MQTT2_SERVER"></a>
 <h3>MQTT2_SERVER</h3>
 <ul>
   MQTT2_SERVER is a builtin/cleanroom implementation of an MQTT server using no
@@ -622,7 +626,7 @@ MQTT2_SERVER_ReadDebug($$)
   and performance). It is intended to simplify connecting MQTT devices to FHEM.
   <br> <br>
 
-  <a name="MQTT2_SERVERdefine"></a>
+  <a id="MQTT2_SERVER-define"></a>
   <b>Define</b>
   <ul>
     <code>define &lt;name&gt; MQTT2_SERVER &lt;tcp-portnr&gt; [global|IP]</code>
@@ -643,7 +647,7 @@ MQTT2_SERVER_ReadDebug($$)
   </ul>
   <br>
 
-  <a name="MQTT2_SERVERset"></a>
+  <a id="MQTT2_SERVER-set"></a>
   <b>Set</b>
   <ul>
     <li>publish -r topic value<br>
@@ -652,15 +656,15 @@ MQTT2_SERVER_ReadDebug($$)
   </ul>
   <br>
 
-  <a name="MQTT2_SERVERget"></a>
+  <a id="MQTT2_SERVER-get"></a>
   <b>Get</b>
   <ul>N/A</ul><br>
 
-  <a name="MQTT2_SERVERattr"></a>
+  <a id="MQTT2_SERVER-attr"></a>
   <b>Attributes</b>
   <ul>
 
-    <a name="MQTT2_SERVERclientId"></a>
+    <a id="MQTT2_SERVER-attr-clientId"></a>
     <li>clientId &lt;name&gt;<br>
       set the MQTT clientId for all connections, for setups with clients
       creating a different MQTT-ID for each connection. The autocreate
@@ -669,7 +673,7 @@ MQTT2_SERVER_ReadDebug($$)
       attributes.
       </li></br>
 
-    <a name="MQTT2_SERVERclientOrder"></a>
+    <a id="MQTT2_SERVER-attr-clientOrder"></a>
     <li>clientOrder [MQTT2_DEVICE] [MQTT_GENERIC_BRIDGE]<br>
       set the notification order for client modules. This is 
       relevant when autocreate is active, and the default order
@@ -683,12 +687,12 @@ MQTT2_SERVER_ReadDebug($$)
       messages, but not forward them.
       </li><br>
 
-    <a name="MQTT2_SERVERignoreRegexp"></a>
+    <a id="MQTT2_SERVER-attr-ignoreRegexp"></a>
     <li>ignoreRegexp<br>
       if $topic:$message matches ignoreRegexp, then it will be silently ignored.
       </li>
 
-    <a name="MQTT2_SERVERkeepaliveFactor"></a>
+    <a id="MQTT2_SERVER-attr-keepaliveFactor"></a>
     <li>keepaliveFactor<br>
       the oasis spec requires a disconnect, if after 1.5 times the client
       supplied keepalive no data or PINGREQ is sent. With this attribute you
@@ -700,13 +704,13 @@ MQTT2_SERVER_ReadDebug($$)
       </ul>
       </li>
     
-    <a name="MQTT2_SERVERrawEvents"></a>
+    <a id="MQTT2_SERVER-attr-rawEvents"></a>
     <li>rawEvents &lt;topic-regexp&gt;<br>
       Send all messages as events attributed to this MQTT2_SERVER instance.
       Should only be used, if there is no MQTT2_DEVICE to process the topic.
       </li><br>
 
-    <a name="MQTT2_SERVERrePublish"></a>
+    <a id="MQTT2_SERVER-attr-rePublish"></a>
     <li>rePublish<br>
       if a topic is published from a source inside of FHEM (e.g. MQTT2_DEVICE),
       it is only sent to real MQTT clients, and it will not internally
@@ -714,7 +718,7 @@ MQTT2_SERVER_ReadDebug($$)
       to the FHEM internal clients.
       </li><br>
 
-    <a name="MQTT2_SERVERSSL"></a>
+    <a id="MQTT2_SERVER-attr-SSL"></a>
     <li>SSL<br>
       Enable SSL (i.e. TLS).
       </li><br>
@@ -728,7 +732,7 @@ MQTT2_SERVER_ReadDebug($$)
        also the SSL attribute.
        </li><br>
 
-    <a name="MQTT2_SERVERautocreate"></a>
+    <a id="MQTT2_SERVER-attr-autocreate"></a>
     <li>autocreate [no|simple|complex]<br>
       MQTT2_DEVICES will be automatically created upon receiving an
       unknown message. Set this value to no to disable autocreating, the

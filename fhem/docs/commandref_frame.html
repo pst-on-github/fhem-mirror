@@ -519,7 +519,7 @@ attribute list if you want to know if a device supports these attributes.  <br>
     <p>
 
     <a name="event-aggregator"></a>
-    <li>event-aggregator</li>
+    <li>event-aggregator
     The primary uses of this attribute are to calculate (time-weighted) averages of 
     readings over time periods and to throttle the update rate of readings and thus 
     the amount of data written to the logs.<p>
@@ -584,7 +584,7 @@ attribute list if you want to know if a device supports these attributes.  <br>
     </li>
     <p>
 
-    <a name="event-min-interval"></a>
+    <a name="event-min-interval">bla</a>
     <li>event-min-interval<br>
     This attribute takes a comma-separated list of reading:minInterval pairs.
     You may use regular expressions for reading. Events will only be
@@ -679,12 +679,34 @@ The following local attributes are used by a wider range of devices:
         for this type of device. The attribute IODev needs to be used only if
         you attached more than one physical device capable of receiving signals
         for this logical device.</li><br>
-    <li>Special: attribute disable can be toggled<br/>
-        Attribute "disable" can be toggled by issuing the following command:<br/>
-        <br/>
-        <code>attr &lt;device&gt; disable toggle</code><br/>
-        <br/>
-        Attribute "disable" must be offered by the corresponding module</li>
+
+    <a name="disable"></a>
+    <li>disable<br>
+        Disables the corresponding device. Note: it can be toggled by issuing the following command:<br/>
+        <br>
+        <code>attr &lt;device&gt; disable toggle</code>
+        </li><br>
+
+    <a name="disabledForIntervals"></a>
+    <li>disabledForIntervals HH:MM-HH:MM HH:MM-HH:MM ...<br>
+        Space separated list of HH:MM or D@HH:MM tupels. If the current time is
+        between the two time specifications, the current device is disabled.
+        Instead of HH:MM you can also specify HH or HH:MM:SS. D is the day of
+        the week, with 0 indicating Sunday and 3 indicating Wednesday.
+        Specifying the day for the "from" part does _not_ specify it for the
+        "to" part, i.e.  1@00-24 will disable from monday to the end of the
+        week, but not on sunday (as 1@00 is greater than any time on sunday).
+        To specify an interval spawning midnight, you have to specify two
+        intervals, e.g.:
+        <ul>
+          23:00-24:00 00:00-01:00
+        </ul>
+        If parts of the attribute value are enclosed in {}, they are evaluated:
+        <ul>
+          {sunset_abs()}-24 {sunrise_abs()}-08
+        </ul>
+        </li><br>
+
 </ul>
 <!-- attributes end - diese Zeile nicht entfernen! -->
 
@@ -694,7 +716,7 @@ The following local attributes are used by a wider range of devices:
 <a name="attr"></a>
 <h3>attr</h3>
 <ul>
-  <code>attr [-a] [-r] &lt;devspec&gt; &lt;attrname&gt; [&lt;value&gt;]</code>
+  <code>attr [-a|-r|-silent] &lt;devspec&gt; &lt;attrname&gt; [&lt;value&gt;]</code>
   <br>
 
   <br>Set an attribute for a device defined by <a href="#define">define</a>.
@@ -712,6 +734,7 @@ The following local attributes are used by a wider range of devices:
   space will be added automatically to the old value before appending the
   new.<br>
   With the -r option one can remove a part of an attribute value.<br>
+  With the -silent option the command is not recorded in the "save -?" list.<br>
   <br>
 
   Examples:
@@ -772,6 +795,9 @@ The following local attributes are used by a wider range of devices:
       be loaded. Used by fhem.cfg.demo, as using the RSS example requires the
       installation of several uncommon perl modules. 
       </li><br>
+    <li>-silent<br>
+      Do no enter the command in the "save ?" list.
+      </li><br>
   </ul>
 
 </ul>
@@ -780,8 +806,8 @@ The following local attributes are used by a wider range of devices:
 <a name="defmod"></a>
 <h3>defmod</h3>
 <ul>
-  <code>defmod [-temporary] &lt;name&gt; &lt;type&gt; &lt;type-specific&gt;</code><br>
-  <br>
+  <code>defmod [option] &lt;name&gt; &lt;type&gt; &lt;type-specific&gt;</code>
+  <br><br>
   Define a device or modify it, if it already exists. E.g. to switch off a lamp
   10 Minutes after the last message from the motion detector, you may use
   <ul><code>
@@ -789,7 +815,8 @@ The following local attributes are used by a wider range of devices:
   </code></ul>
   Using define here for the mdOff will generate an error if the motion detector
   triggers within the 10 minutes after the first event, as the mdOff at
-  definition still exists.
+  definition still exists.<br>
+  For the options see the define documentation.
   <br>
 </ul>
 <!-- defmod end -->
@@ -1024,7 +1051,7 @@ The following local attributes are used by a wider range of devices:
 <a name="modify"></a>
 <h3>modify</h3>
 <ul>
-  <code>modify &lt;name&gt; &lt;type-dependent-options&gt;</code>
+  <code>modify [-silent] &lt;name&gt; &lt;type-dependent-options&gt;</code>
   <br><br>
 
   Used to modify some definitions. Useful for changing some <a
@@ -1032,8 +1059,9 @@ The following local attributes are used by a wider range of devices:
   one argument to an at type definition, only the time part will be changed. In
   case of a notify type definition, only the regex part will be changed.  All
   other values (state, attributes, etc) will remain intact.
-  After modify, the global event "MODIFIED" will be generated.
-  <br><br>
+  After modify, the global event "MODIFIED" will be generated.<br>
+  With the -silent option the command is not recorded in the "save -?" list.<br>
+  <br>
   Example:
   <ul>
     <code>define lampon at 19:00 set lamp on</code><br>
@@ -1700,6 +1728,13 @@ The following local attributes are used by a wider range of devices:
         Windows.
     </li><br>
 
+    <a id="perlSyntaxCheck"></a>
+    <li>perlSyntaxCheck<br>
+        by setting the <b>global</b> attribute perlSyntaxCheck, a syntax check
+        will be executed upon definition or modification, if the command is
+        perl and FHEM is already started.
+        </li><br>
+
     <a name="pidfilename"></a>
     <li>pidfilename<br>
         Write the process id of the perl process to the specified file. The
@@ -1759,7 +1794,7 @@ The following local attributes are used by a wider range of devices:
         attributes for all devices. Without specifying them you will not be
         able to set them (in order to prevent typos).<br>
         userattr can also specified for other devices, in this case
-        these additinal attribute names are only valid for this device.
+        these additional attribute names are only valid for this device.
     </li><br>
 
     <a name="dupTimeout"></a>

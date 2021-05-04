@@ -401,6 +401,7 @@ my %fbhttp_readings = (
    power           => 'sprintf("power:%.2f W", $val/1000)',
    present         => '"present:".($val?"yes":"no")',
    productname     => '"FBTYPE:$val"',
+   rel_humidity    => '"rel_humidity:$val %"',
    state           => '"state:".($val?"on":"off")',
    voltage         => 'sprintf("voltage:%.3f V", $val/1000)',
 #  tist => 'sprintf("temperature:%.1f C (measured)", $val/2)', # Forum #57644
@@ -447,18 +448,18 @@ FBDECT_ParseHttp($$$)
   $omsg =~ s, ([a-z_]+?)="([^"]*)",$h{$1}=$2 if(!$h{$1}),ge; # Attributes
 
   if($h{lastpressedtimestamp}) { # Dect400/#94700, 440/#118303
-    sub dp {
+    sub FBDECT_ParseTimestamp {
       my ($txt,$h,$ln) = (@_);
       $txt =~ s#<([^/\s>]+?)[^/]*?>(.*?)</\g1>#
         my ($n,$c) = ($1,$2);
-        $ln = makeReadingName($1) if($n eq "name" && $c =~ m/: (.*)$/);
+        $ln = makeReadingName($1) if($n eq "name" && $c =~ m/:\s*(.*)$/);
         if($n eq "lastpressedtimestamp" && $ln) {
           $h->{"${n}_$ln"} = ($c =~ m/^\d{10}$/ ? FmtDateTime($c) : "N/A");
         }
-        dp($c, $h) if($c && $c =~ m/^<.*>$/);
+        FBDECT_ParseTimestamp($c, $h) if($c && $c =~ m/^<.*>$/);
       #gex;
     }
-    dp($msg, \%h);
+    FBDECT_ParseTimestamp($msg, \%h);
   }
 
   my $ain = $h{identifier};

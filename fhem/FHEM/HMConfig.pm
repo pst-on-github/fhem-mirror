@@ -395,7 +395,7 @@ foreach my $al (keys %culHmModel){ # duplicate entries for alias devices
   OffDlyBlink     =>{a=> 14.5,s=>0.1,l=>3,min=>0      ,max=>1     ,c=>'lit'      ,p=>'y',f=>''      ,u=>''    ,d=>0,t=>"blink when in off delay"              ,lit=>{off=>0,on=>1}},
   OnLvlPrio       =>{a=> 14.6,s=>0.1,l=>3,min=>0      ,max=>1     ,c=>'lit'      ,p=>'y',f=>''      ,u=>''    ,d=>0,t=>""                                     ,lit=>{high=>0,low=>1}},
   OnDlyMode       =>{a=> 14.7,s=>0.1,l=>3,min=>0      ,max=>1     ,c=>'lit'      ,p=>'y',f=>''      ,u=>''    ,d=>0,t=>""                                     ,lit=>{setToOff=>0,NoChange=>1}},
-  OffLevel        =>{a=> 15.0,s=>1.0,l=>3,min=>"0.0"  ,max=>100   ,c=>''         ,p=>'y',f=>2       ,u=>'%'   ,d=>0,t=>"PowerLevel off"},
+  OffLevel        =>{a=> 15.0,s=>1.0,l=>3,min=>"0.0"  ,max=>100.5 ,c=>''         ,p=>'y',f=>2       ,u=>'%'   ,d=>0,t=>"PowerLevel off"},
   OnMinLevel      =>{a=> 16.0,s=>1.0,l=>3,min=>"0.0"  ,max=>100   ,c=>''         ,p=>'y',f=>2       ,u=>'%'   ,d=>0,t=>"minimum PowerLevel"},
   OnLevel         =>{a=> 17.0,s=>1.0,l=>3,min=>"0.0"  ,max=>100.5 ,c=>''         ,p=>'y',f=>2       ,u=>'%'   ,d=>1,t=>"PowerLevel on"                        ,lit=>{oldLevel=>100.5}},
   OnLevelArm      =>{a=> 17.0,s=>1.0,l=>3,min=>0      ,max=>100   ,c=>'lit'      ,p=>'y',f=>''      ,u=>''    ,d=>1,t=>"onLevel on"                           ,lit=>{disarmed=>0,extSens=>50,allSens=>200}},
@@ -527,7 +527,7 @@ foreach my $al (keys %culHmModel){ # duplicate entries for alias devices
   confBtnTime     =>{a=> 21.0,s=>1.0,l=>0,min=>1      ,max=>255   ,c=>''         ,p=>'n',f=>''      ,u=>'min' ,d=>0,t=>"255=permanent"                        ,lit=>{permanent=>255}},
 #repeater                                                                        
   compMode        =>{a=> 23.0,s=>0.1,l=>0,min=>0      ,max=>1     ,c=>'lit'      ,p=>'n',f=>''      ,u=>''    ,d=>1,t=>"compatibility moden"                  ,lit=>{off=>0,on=>1}},
-  localResDis     =>{a=> 24.0,s=>1.0,l=>0,min=>1      ,max=>1     ,c=>'lit'      ,p=>'n',f=>''      ,u=>''    ,d=>0,t=>"local reset disable"                  ,lit=>{off=>0,on=>200}},
+  localResDis     =>{a=> 24.0,s=>1.0,l=>0,min=>0      ,max=>1     ,c=>'lit'      ,p=>'n',f=>''      ,u=>''    ,d=>0,t=>"local reset disable"                  ,lit=>{off=>0,on=>200}},
   globalBtnLock   =>{a=> 25.0,s=>1.0,l=>0,min=>1      ,max=>255   ,c=>'lit'      ,p=>'n',f=>''      ,u=>''    ,d=>0,t=>"global button lock"                   ,lit=>{off=>0,on=>200}},
   modusBtnLock    =>{a=> 26.0,s=>1.0,l=>0,min=>1      ,max=>255   ,c=>'lit'      ,p=>'n',f=>''      ,u=>''    ,d=>0,t=>"mode button lock"                     ,lit=>{off=>0,on=>200}},
   paramSel        =>{a=> 27.0,s=>1.0,l=>0,min=>0      ,max=>4     ,c=>'lit'      ,p=>'n',f=>''      ,u=>''    ,d=>1,t=>"data transfered to peer"              ,lit=>{off=>0,T1=>1,T2=>2,T1_T2=>3,T2_T1=>4}},
@@ -1109,7 +1109,8 @@ $culHmRegType{pushButton}     = $culHmRegType{remote};
  ,"HM-CC-SCD"         =>{ peerNeedsBurst  =>1,expectAES       =>1
                          ,                                        transmitTryMax  =>1,evtFltrTime     =>1
                          ,msgScdPosA      =>1,msgScdPosB      =>1,msgScdPosC      =>1,msgScdPosD      =>1}
- ,"HM-SEC-RHS"        =>{ msgRhsPosA      =>1,msgRhsPosB      =>1,msgRhsPosC      =>1
+ ,"HM-SEC-RHS"        =>{                     sabotageMsg     =>1
+                         ,msgRhsPosA      =>1,msgRhsPosB      =>1,msgRhsPosC      =>1
                          ,                    ledOnTime       =>1,eventDlyTime    =>1}
  ,"HM-SEC-SC"         =>{                     sabotageMsg     =>1
                          ,msgScPosA       =>1,msgScPosB       =>1
@@ -1324,34 +1325,34 @@ $culHmRegModel{"HM-OU-CFM-TW"}          = $culHmRegModel{"HM-OU-CFM-PL"};
                          ,lgMultiExec     =>1,shMultiExec     =>1
                         }
  ,"HM-LC-RGBW-WM02"   =>{ ActHsvCol       =>1,waRed           =>1,waGreen         =>1,waBlue          =>1
-                         ,OnDly           =>1,OnTime          =>1,OffDly          =>1,OffTime         =>1
-                         ,OffDlyBlink     =>1,OnLvlPrio       =>1,OnDlyMode       =>1
-                         ,ActionTypeDim   =>1,OnTimeMode      =>1,OffTimeMode     =>1
-                         ,OffLevel        =>1,OnMinLevel      =>1,OnLevel         =>1
-                         ,RampSstep       =>1,RampOnTime      =>1,RampOffTime     =>1
-                         ,DimMinLvl       =>1,DimMaxLvl       =>1,DimStep         =>1
-                         ,DimJtOn         =>1,DimJtDlyOn      =>1,DimJtRampOff    =>1
-                         ,DimJtOff        =>1,DimJtDlyOff     =>1,DimJtRampOn     =>1
-                         ,CtValLo         =>1,CtValHi         =>1
-                         ,CtOn            =>1,CtDlyOn         =>1,CtRampOn        =>1
-                         ,CtOff           =>1,CtDlyOff        =>1,CtRampOff       =>1
-                         ,OffDlyStep      =>1,OffDlyNewTime   =>1,OffDlyOldTime   =>1
-                         ,lgMultiExec     =>1,shMultiExec     =>1
+                         # ,OnDly           =>1,OnTime          =>1,OffDly          =>1,OffTime         =>1
+                         # ,OffDlyBlink     =>1,OnLvlPrio       =>1,OnDlyMode       =>1
+                         # ,ActionTypeDim   =>1,OnTimeMode      =>1,OffTimeMode     =>1
+                         # ,OffLevel        =>1,OnMinLevel      =>1,OnLevel         =>1
+                         # ,RampSstep       =>1,RampOnTime      =>1,RampOffTime     =>1
+                         # ,DimMinLvl       =>1,DimMaxLvl       =>1,DimStep         =>1
+                         # ,DimJtOn         =>1,DimJtDlyOn      =>1,DimJtRampOff    =>1
+                         # ,DimJtOff        =>1,DimJtDlyOff     =>1,DimJtRampOn     =>1
+                         # ,CtValLo         =>1,CtValHi         =>1
+                         # ,CtOn            =>1,CtDlyOn         =>1,CtRampOn        =>1
+                         # ,CtOff           =>1,CtDlyOff        =>1,CtRampOff       =>1
+                         # ,OffDlyStep      =>1,OffDlyNewTime   =>1,OffDlyOldTime   =>1
+                         # ,lgMultiExec     =>1,shMultiExec     =>1
                         }
  ,"HM-LC-RGBW-WM03"   =>{ ActColPrgm      =>1,ActMinBoarder   =>1,ActMaxBoarder   =>1,colChangeSpeed  =>1
-                         ,OnDly           =>1,OnTime          =>1,OffDly          =>1,OffTime         =>1
-                         ,OffDlyBlink     =>1,OnLvlPrio       =>1,OnDlyMode       =>1
-                         ,ActionTypeDim   =>1,OnTimeMode      =>1,OffTimeMode     =>1
-                         ,OffLevel        =>1,OnMinLevel      =>1,OnLevel         =>1
-                         ,RampSstep       =>1,RampOnTime      =>1,RampOffTime     =>1
-                         ,DimMinLvl       =>1,DimMaxLvl       =>1,DimStep         =>1
-                         ,DimJtOn         =>1,DimJtDlyOn      =>1,DimJtRampOff    =>1
-                         ,DimJtOff        =>1,DimJtDlyOff     =>1,DimJtRampOn     =>1
-                         ,CtValLo         =>1,CtValHi         =>1
-                         ,CtOn            =>1,CtDlyOn         =>1,CtRampOn        =>1
-                         ,CtOff           =>1,CtDlyOff        =>1,CtRampOff       =>1
-                         ,OffDlyStep      =>1,OffDlyNewTime   =>1,OffDlyOldTime   =>1
-                         ,lgMultiExec     =>1,shMultiExec     =>1
+                         # ,OnDly           =>1,OnTime          =>1,OffDly          =>1,OffTime         =>1
+                         # ,OffDlyBlink     =>1,OnLvlPrio       =>1,OnDlyMode       =>1
+                         # ,ActionTypeDim   =>1,OnTimeMode      =>1,OffTimeMode     =>1
+                         # ,OffLevel        =>1,OnMinLevel      =>1,OnLevel         =>1
+                         # ,RampSstep       =>1,RampOnTime      =>1,RampOffTime     =>1
+                         # ,DimMinLvl       =>1,DimMaxLvl       =>1,DimStep         =>1
+                         # ,DimJtOn         =>1,DimJtDlyOn      =>1,DimJtRampOff    =>1
+                         # ,DimJtOff        =>1,DimJtDlyOff     =>1,DimJtRampOn     =>1
+                         # ,CtValLo         =>1,CtValHi         =>1
+                         # ,CtOn            =>1,CtDlyOn         =>1,CtRampOn        =>1
+                         # ,CtOff           =>1,CtDlyOff        =>1,CtRampOff       =>1
+                         # ,OffDlyStep      =>1,OffDlyNewTime   =>1,OffDlyOldTime   =>1
+                         # ,lgMultiExec     =>1,shMultiExec     =>1
                         }
 
  ,"HM-HM-LC-DW-WM01"  =>{ characteristic  =>1,ovrTempLvl      =>1,redTempLvl      =>1,redLvl          =>1}
@@ -1683,6 +1684,8 @@ $culHmRegChan{"HM-OU-CFM-TW02"}         = $culHmRegChan{"HM-OU-CFM-PL02"};
 %culHmVrtGets       = (
                        param      => "-param-",
                        cmdList    => "[({short}|long)]",
+                       deviceInfo => "[({short}|long)]",
+                       list       => "[({normal}|full)]"
                       );
 %culHmSubTypeGets   = (
                        none4Type  =>{ "test"=>"" }
@@ -1699,7 +1702,7 @@ $culHmRegChan{"HM-OU-CFM-TW02"}         = $culHmRegChan{"HM-OU-CFM-PL02"};
 ##############################---set---########################################
 %culHmGlobalSets       = (# all but virtuals
                        regBulk       => "-list-.-peerChn- -addr1:data1- -addr2:data2-..."
-                      ,getRegRaw     => "(List0|List1|List2|List3|List4|List5|List6) [-peerChn-]"
+                      ,getRegRaw     => "(List0|List1|List2|List3|List4|List5|List6|List7) [-peerChn-]"
                       ,getConfig     => ""
                       ,regSet        => "[(prep|{exec})] -regName- -value- [-peerChn-]"
                       ,clear         => "[(readings|trigger|register|oldRegs|rssi|msgEvents|{msgErrors}|attack|all)]"
@@ -1707,7 +1710,7 @@ $culHmRegChan{"HM-OU-CFM-TW02"}         = $culHmRegChan{"HM-OU-CFM-PL02"};
 );
 %culHmGlobalSetsVrtDev = (# virtuals and devices without subtype
                        virtual       => "[(1..50;1|{1})]"
-                      ,clear         => "[(readings|rssi|msgErrors|{msgErrors}|unknownDev)]"
+                      ,clear         => "[(readings|rssi|msgEvents|attack|{msgErrors}|unknownDev)]"
 );
 
 %culHmReglSets         = (# entities with regList
@@ -1769,10 +1772,10 @@ $culHmSubTypeDevSets{blindActuator}     = $culHmSubTypeDevSets{switch};
                                           ,off            =>""
                                           ,old            =>""
                                           ,toggle         =>""
-                                          ,pct            =>"(-value-|old) [(-ontime-|{})] [(-ramptime-|{})]"
+                                          ,pct            =>"(-value-|old) [(-ontime-|{0})] [(-ramptime-|{2.4})] 'ontime: 0 = forever'"
                                           ,stop           =>""
-                                          ,up             =>"'change:'[(0..100;1|{10})] [(-ontime-|{})] [(-ramptime-|{})]"
-                                          ,down           =>"'change:'[(0..100;1|{10})] [(-ontime-|{})] [(-ramptime-|{})]"
+                                          ,up             =>"'change:'[(0..100;1|{10})] [(-ontime-|{0})] [(-ramptime-|{2.4})] 'ontime: 0 = forever'"
+                                          ,down           =>"'change:'[(0..100;1|{10})] [(-ontime-|{0})] [(-ramptime-|{2.4})] 'ontime: 0 = forever'"
                                           ,inhibit        =>"[(on|{off})]"
                                           ,statusRequest  =>""
                                           ,peerIODev      =>"[IO] -btn- [({set}|unset)] 'not for future use'"
@@ -1866,7 +1869,7 @@ $culHmModelSets{"HM-HM-LC-DW-WM"}        = $culHmSubTypeSets{dimmer};   ##### re
 
 %culHmChanSets = (
                       "HM-CC-TC00"           =>{ "desired-temp" => "(on|off|6.0..30.0;0.5)"
-                                                ,statusRequest  => ""
+#                                                ,statusRequest  => ""
                                                 ,sysTime        => ""
 #                                                ,getSerial      => ""
                                                }
@@ -1959,23 +1962,23 @@ $culHmModelSets{"HM-HM-LC-DW-WM"}        = $culHmSubTypeSets{dimmer};   ##### re
                                                 ,on             =>""
                                                 ,off            =>""
                                                 ,toggle         =>""
-                                                ,pct            =>"-value- [(-ontime-|{})] [(-ramptime-|{})]"
+                                                ,pct            =>"-value- [(-ontime-|{0})] [(-ramptime-|{2.4})] 'ontime: 0 = forever'"
                                                 ,stop           =>""
-                                                ,up             =>"'change:'[(0..100;1|{10})] [(-ontime-|{})] [(-ramptime-|{})]"
-                                                ,down           =>"'change:'[(0..100;1|{10})] [(-ontime-|{})] [(-ramptime-|{})]"
+                                                ,up             =>"'change:'[(0..100;1|{10})] [(-ontime-|{0})] [(-ramptime-|{2.4})] 'ontime: 0 = forever'"
+                                                ,down           =>"'change:'[(0..100;1|{10})] [(-ontime-|{0})] [(-ramptime-|{2.4})] 'ontime: 0 = forever'"
                                                 ,inhibit        =>"[(on|{off})]"
                                                 ,statusRequest  =>""
                                                 ,peerIODev      =>"[IO] -btn- [({set}|unset)] 'not for future use'"
                                                }
-                     ,"HM-LC-RGBW-WM02"      =>{ brightCol      =>"'bright:'(0..100;1|{100}) 'colVal:' (0..100;1|{100}) [(-ontime-|{})] [(-ramp-|{})]"
+                     ,"HM-LC-RGBW-WM02"      =>{ brightCol      =>"'bright:' (0..100;0.5|{100}) 'colVal:' (0..100;1|{100}) [(-ontime-|{})] [(-ramp-|{})]"
                                                 ,color          =>"(0..100;1|{100})"
                                                 ,on             =>""
                                                 ,off            =>""
                                                 ,up             =>"'change:'[(0..100;1|{10})] [(-ontime-|{})] [(-ramptime-|{})]"
                                                 ,down           =>"'change:'[(0..100;1|{10})] [(-ontime-|{})] [(-ramptime-|{})]"
                                                }
-                     ,"HM-LC-RGBW-WM03"      =>{ brightAuto     =>"-bright- -colProg- [(-min-|{})] [(-max-|{})] [(-ontime-|{})] [(-ramp-|{})]"
-                                                ,colProgram     =>"[(0..255;1|{0})]"
+                     ,"HM-LC-RGBW-WM03"      =>{ colProgram     =>"(0..255;1|{0})"                                           
+                                                ,brightAuto     =>"'bright:' (0..100;0.5|{100}) 'colProg:' [(0..255;1|{0})] 'min:' [(0..255;1|{0})] 'max:' [(0..255;1|{255})] [(-ontime-|{0})] [(-ramp-|{5})]"
                                                }
                      ,"HM-SEC-SIR-WM01"      =>{ on             =>""
                                                 ,off            =>""

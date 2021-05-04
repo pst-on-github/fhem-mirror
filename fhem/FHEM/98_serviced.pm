@@ -16,7 +16,7 @@ use Blocking;
 use Time::HiRes;
 use vars qw{%defs};
 
-my $servicedVersion = "1.2.6";
+my $servicedVersion = "1.2.7";
 
 sub serviced_shutdownwait($);
 
@@ -78,7 +78,6 @@ sub serviced_Define($$)
     }
   }
   readingsSingleUpdate($hash,"state","Initialized",1) if ($init_done);
-  serviced_GetUpdate($hash);
   return undef;
 }
 
@@ -273,7 +272,7 @@ sub serviced_ExecCmd($)
   Log3 $name,5,"$name: serviced_ExecCmd com: $com, line: $line";
   my @ret;
   my $re = "";
-  foreach (@qx)
+  for (@qx)
   {
     chomp;
     $_ =~ s/[\s\t ]{1,}/ /g;
@@ -388,10 +387,10 @@ sub serviced_GetUpdate(@)
 {
   my ($hash) = @_;
   my $name = $hash->{NAME};
+  RemoveInternalTimer($hash);
+  return if (IsDisabled($name) || !$init_done);
   my $sec = defined $hash->{helper}{interval} ? $hash->{helper}{interval} : AttrNum($name,"serviceStatusInterval",undef);
   delete $hash->{helper}{interval} if (defined $hash->{helper}{interval});
-  RemoveInternalTimer($hash);
-  return if (IsDisabled($name));
   serviced_Set($hash,$name,"status");
   return if (!$sec);
   InternalTimer(gettimeofday() + $sec,"serviced_GetUpdate",$hash);

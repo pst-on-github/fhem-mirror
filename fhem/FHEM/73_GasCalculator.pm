@@ -391,8 +391,8 @@ sub GasCalculator_Set($@)
 		### Create Log entries for debugging
 		Log3 $GasCalcName, 5, $GasCalcName. " - Syncing Counter with :" . $value;
 		
-		### Sreach for the ReadingsName of the Current CounterValue
-		my @SearchResult = grep(/_CounterCurrent/, @cList);
+		### Search for the ReadingsName of the Current CounterValue
+		my @SearchResult = grep(/_Meter/, @cList);
 
 		### Get current CalculatorValue
 		my $CalculaterValueCurrent = ReadingsVal($GasCalcName, $SearchResult[0], 0); 
@@ -422,7 +422,7 @@ sub GasCalculator_Set($@)
 		$attr{$GasCalcName}{GasCounterOffset} = $CounterOffsetNew;
 
 		### Create ReturnMessage
-		$ReturnMessage = $GasCalcName . " - Successfully synchromized Counter and Calculator with : " . $value . " kWh";
+		$ReturnMessage = $GasCalcName . " - Successfully synchronized Counter and Calculator with : " . $value . " kWh";
 	}
 	### For Test purpose only
 	# elsif ($reading eq "Test") 
@@ -455,16 +455,40 @@ sub GasCalculator_MidnightTimer($)
 	my ($GasCountName, $GasCountReadingRegEx) = split(":", $RegEx, 2);
 	my $GasCountDev							  = $defs{$GasCountName};
 	$GasCountReadingRegEx					  =~ s/[\.\*]+$//;
+	$GasCountReadingRegEx					  =~ s/[:]+$//;
 	my $GasCountReadingRegExNeg				  = $GasCountReadingRegEx . "_";
 
 	my @GasCountReadingNameListComplete = keys(%{$GasCountDev->{READINGS}});
 	my @GasCountReadingNameListFiltered;
 
-	foreach my $GasCountReadingName (@GasCountReadingNameListComplete) {
-		if (($GasCountReadingName =~ m[$GasCountReadingRegEx]) && ($GasCountReadingName !~ m[$GasCountReadingRegExNeg])) {
-			push(@GasCountReadingNameListFiltered, $GasCountReadingName);
-		}
+	### Create Log entries for debugging purpose
+	Log3 $GasCalcName, 5, $GasCalcName. " : GasCalculator_MidnightTimer GasCountName        : " . $GasCountName;
+	Log3 $GasCalcName, 5, $GasCalcName. " : GasCalculator_MidnightTimer RegEx               : " . $RegEx;
+	Log3 $GasCalcName, 5, $GasCalcName. " : GasCalculator_MidnightTimer ReadingRegEx        : " . $GasCountReadingRegEx;
+	Log3 $GasCalcName, 5, $GasCalcName. " : GasCalculator_MidnightTimer ReadingRegExNeg     : " . $GasCountReadingRegExNeg;
+
+	### If no RegEx is available, leave routine
+	if (($GasCountReadingRegEx eq "") || ($GasCountReadingRegExNeg eq "")) { 
+		Log3 $GasCalcName, 5, $GasCalcName. " : GasCalculator_MidnightTimer                     : ERROR! No RegEx has been previously stored! Beaking midnight routine.";
+		Log3 $GasCalcName, 5, $GasCalcName. " : GasCalculator_MidnightTimer ReadingRegEx        : " . $GasCountReadingRegEx;
+		Log3 $GasCalcName, 5, $GasCalcName. " : GasCalculator_MidnightTimer ReadingRegExNeg     : " . $GasCountReadingRegExNeg;
+		return;
 	}
+	
+	### Check whether system failure threat is given or log error message
+	eval {
+		### For each valid RegEx entry given in the list of existing devices
+		foreach my $GasCountReadingName (@GasCountReadingNameListComplete) {
+			if (($GasCountReadingName =~ m[$GasCountReadingRegEx]) && ($GasCountReadingName !~ m[$GasCountReadingRegExNeg])) {
+				push(@GasCountReadingNameListFiltered, $GasCountReadingName);
+			}
+		}
+		1;
+	} or do {
+		my $ErrorMessage = $@;
+		Log3 $GasCalcName, 2, $GasCalcName. " : Something went wrong with the RegEx : " . $ErrorMessage;
+		return;
+	};
 
 	### Create Log entries for debugging purpose
 	Log3 $GasCalcName, 5, $GasCalcName. " : GasCalculator_MidnightTimer__________________________________________________________";
@@ -1229,7 +1253,7 @@ sub GasCalculator_Notify($$)
 		<tr>
 			<td>
 				The GasCalculator Module calculates the gas consumption and costs of one ore more gas counters.<BR>
-				It is not a counter module itself but requires a regular expression (regex or regexp) in order to know where retrieve the counting ticks of one or more mechanical gas counter.<BR>
+				It is not a counter module itself but requires a regular expression (regex or regexp) in order to know where to retrieve the continously increasing counter value of one or more mechanical gas counter.<BR>
 				<BR>
 				As soon the module has been defined within the fhem.cfg, the module reacts on every event of the specified counter like myOWDEVICE:counter.* etc.<BR>
 				<BR>
@@ -1342,7 +1366,7 @@ sub GasCalculator_Notify($$)
 		<tr>
 			<td>
 				Das GasCalculator Modul berechnet den Gas - Verbrauch und den verbundenen Kosten von einem oder mehreren Gas-Z&auml;hlern.<BR>
-				Es ist kein eigenes Z&auml;hlermodul sondern ben&ouml;tigt eine Regular Expression (regex or regexp) um das Reading mit den Z&auml;hl-Impulse von einem oder mehreren Gasz&auml;hlern zu finden.<BR>
+				Es ist kein eigenes Z&auml;hlermodul sondern ben&ouml;tigt eine Regular Expression (regex or regexp) um das Reading mit dem kontinuierlich wachsenden Z&auml;hlerstand von einem oder mehreren Gasz&auml;hlern zu finden.<BR>
 				<BR>
 				Sobald das Modul in der fhem.cfg definiert wurde, reagiert das Modul auf jedes durch das regex definierte event wie beispielsweise ein myOWDEVICE:counter.* etc.<BR>
 				<BR>
@@ -1445,11 +1469,11 @@ sub GasCalculator_Notify($$)
 =for :application/json;q=META.json 73_GasCalculator.pm
 {
   "abstract": "Calculates the gas energy consumption and costs.",
-  "description": "The GasCalculator Module calculates the gas consumption and costs of one ore more gas counters.<BR>It is not a counter module itself but requires a regular expression (regex or regexp) in order to know where retrieve the counting ticks of one or more mechanical gas counter.<BR>As soon the module has been defined within the fhem.cfg, the module reacts on every event of the specified counter like myOWDEVICE:counter.* etc.<BR>The GasCalculator module provides several current, historical, statistical predictable values around with respect to one or more gas-counter and creates respective readings.<BR>",
+  "description": "The GasCalculator Module calculates the gas consumption and costs of one ore more gas counters.<BR>It is not a counter module itself but requires a regular expression (regex or regexp) in order to know where to retrieve the continously increasing counter value of one or more mechanical gas counter.<BR>As soon the module has been defined within the fhem.cfg, the module reacts on every event of the specified counter like myOWDEVICE:counter.* etc.<BR>The GasCalculator module provides several current, historical, statistical predictable values around with respect to one or more gas-counter and creates respective readings.<BR>",
   "x_lang": {
     "de": {
       "abstract": "Berechnet den Gas-Energieverbrauch und verbundene Kosten",
-      "description": "Das GasCalculator Modul berechnet den Gas - Verbrauch und den verbundenen Kosten von einem oder mehreren Gas-Z&auml;hlern.<BR>Es ist kein eigenes Z&auml;hlermodul sondern ben&ouml;tigt eine Regular Expression (regex or regexp) um das Reading mit den Z&auml;hl-Impulse von einem oder mehreren Gasz&auml;hlern zu finden.<BR>Sobald das Modul in der fhem.cfg definiert wurde, reagiert das Modul auf jedes durch das regex definierte event wie beispielsweise ein myOWDEVICE:counter.* etc.<BR>Das GasCalculator Modul berechnet augenblickliche, historische statistische und vorhersehbare Werte von einem oder mehreren Gas-Z&auml;hlern und erstellt die entsprechenden Readings.<BR>"
+      "description": "Das GasCalculator Modul berechnet den Gas - Verbrauch und den verbundenen Kosten von einem oder mehreren Gas-Z&auml;hlern.<BR>Es ist kein eigenes Z&auml;hlermodul sondern ben&ouml;tigt eine Regular Expression (regex or regexp) um das Reading mit dem kontinuierlich wachsenden Z&auml;hlerstand von einem oder mehreren Gasz&auml;hlern zu finden.<BR>Sobald das Modul in der fhem.cfg definiert wurde, reagiert das Modul auf jedes durch das regex definierte event wie beispielsweise ein myOWDEVICE:counter.* etc.<BR>Das GasCalculator Modul berechnet augenblickliche, historische statistische und vorhersehbare Werte von einem oder mehreren Gas-Z&auml;hlern und erstellt die entsprechenden Readings.<BR>"
     }
   },
   "author": [

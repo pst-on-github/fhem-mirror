@@ -195,9 +195,10 @@ FHEMWEB_Initialize($)
     plotWeekStartDay:0,1,2,3,4,5,6
     nrAxis
     redirectCmds:0,1
+    redirectTo
     refresh
     reverseLogs:0,1
-    roomIcons
+    roomIcons:textField-long
     showUsedFiles:0,1
     sortRooms
     sslVersion
@@ -405,7 +406,7 @@ FW_Read($$)
       $len = unpack( 'n', substr($hash->{BUF},$i,2) );
       $i += 2;
     } elsif( $len == 127 ) {
-      $len = unpack( 'q', substr($hash->{BUF},$i,8) );
+      $len = unpack( 'Q>', substr($hash->{BUF},$i,8) );
       $i += 8;
     }
 
@@ -456,7 +457,8 @@ FW_Read($$)
   @FW_httpheader = split(/[\r\n]+/, $hash->{HDR});
   %FW_httpheader = map {
                          my ($k,$v) = split(/: */, $_, 2);
-                         $k =~ s/(\w+)/\u$1/g; # Forum #39203
+                         $k = lc($k);          #88205
+                         $k =~ s/(\w+)/\u$1/g; #39203
                          $k=>(defined($v) ? $v : 1);
                        } @FW_httpheader;
   delete($hash->{HDR});
@@ -541,9 +543,9 @@ FW_Read($$)
   if($FW_use{sha} && $method eq 'GET' &&
      $FW_httpheader{Connection} && $FW_httpheader{Connection} =~ /Upgrade/i &&
      $FW_httpheader{Upgrade} && $FW_httpheader{Upgrade} =~ /websocket/i &&
-     $FW_httpheader{'Sec-WebSocket-Key'}) {
+     $FW_httpheader{'Sec-Websocket-Key'}) {
 
-    my $shastr = Digest::SHA::sha1_base64($FW_httpheader{'Sec-WebSocket-Key'}.
+    my $shastr = Digest::SHA::sha1_base64($FW_httpheader{'Sec-Websocket-Key'}.
                                 "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
 
     TcpServer_WriteBlocking($FW_chash,
@@ -758,7 +760,7 @@ FW_AsyncOutput($$)
   Log3 $hash->{SNAME}, 4, "AsyncOutput from $hash->{NAME}";
   $hash = $FW_id2inform{$fwid};
   if($hash) {
-    FW_addToWritebuffer($hash, $data."\n");
+    FW_addToWritebuffer($hash, $data."\n") if(defined($hash->{FD})); #120181
   } else {
     $defs{$FW_wname}{asyncOutput}{$fwid} = $data;
   }
@@ -796,6 +798,18 @@ FW_serveSpecial($$$$)
 }
 
 sub
+FW_setStylesheet()
+{
+  $FW_sp = AttrVal($FW_wname, "stylesheetPrefix", "f18");
+  $FW_sp = "" if($FW_sp eq "default");
+  $FW_sp =~ s/^f11//; # Compatibility, #90983
+  $FW_ss = ($FW_sp =~ m/smallscreen/);
+  $FW_tp = ($FW_sp =~ m/smallscreen|touchpad/);
+  @FW_iconDirs = grep { $_ } split(":", AttrVal($FW_wname, "iconPath",
+                              "${FW_sp}:fhemSVG:openautomation:default"));
+}
+
+sub
 FW_answerCall($)
 {
   my ($arg) = @_;
@@ -805,12 +819,7 @@ FW_answerCall($)
   $FW_RETTYPE = "text/html; charset=$FW_encoding";
 
   $MW_dir = "$attr{global}{modpath}/FHEM";
-  $FW_sp = AttrVal($FW_wname, "stylesheetPrefix", "f18");
-  $FW_ss = ($FW_sp =~ m/smallscreen/);
-  $FW_tp = ($FW_sp =~ m/smallscreen|touchpad/);
-  my $spDir = ($FW_sp eq "default" ? "" : "$FW_sp:");
-  @FW_iconDirs = grep { $_ } split(":", AttrVal($FW_wname, "iconPath",
-                                "${spDir}fhemSVG:openautomation:default"));
+  FW_setStylesheet();
   @FW_fhemwebjs = ("fhemweb.js");
   push(@FW_fhemwebjs, "$FW_sp.js") if(-r "$FW_dir/pgm2/$FW_sp.js");
 
@@ -884,6 +893,12 @@ FW_answerCall($)
     return FW_serveSpecial("favicon", "ico", "$FW_icondir/default", 1);
 
   } else {
+    my $redirectTo = AttrVal($FW_wname, "redirectTo","");
+    if($redirectTo) {
+      Log3 $FW_wname, 1, "$FW_wname: redirecting $arg to $FW_ME/$redirectTo$arg";
+      return FW_answerCall("$FW_ME/$redirectTo$arg") 
+    }
+
     Log3 $FW_wname, 4, "$FW_wname: redirecting $arg to $FW_ME";
     TcpServer_WriteBlocking($me,
              "HTTP/1.1 302 Found\r\n".
@@ -1177,6 +1192,7 @@ FW_answerCall($)
     } else {
       my $motd = AttrVal("global", "motd", "");
       my $gie = $defs{global}{init_errors};
+      $gie = "" if(!defined($gie));
       if($motd ne "none" && ($motd || $gie)) {
         FW_addContent("><pre class='motd'>$motd\n$gie</pre></div");
       }
@@ -1191,21 +1207,22 @@ sub
 FW_dataAttr()
 {
   sub
-  addParam($$)
+  addParam($$$)
   {
-    my ($p, $default) = @_;
-    my $val = AttrVal($FW_wname,$p, $default);
+    my ($dev, $p, $default) = @_;
+    my $val = AttrVal($dev, $p, $default);
     $val =~ s/&/&amp;/g;
     $val =~ s/'/&#39;/g;
     return "data-$p='$val' ";
   }
 
   return
-    addParam("jsLog", 0).
-    addParam("confirmDelete", 1).
-    addParam("confirmJSError", 1).
-    addParam("addHtmlTitle", 1).
-    addParam("styleData", "").
+    addParam($FW_wname, "jsLog", 0).
+    addParam($FW_wname, "confirmDelete", 1).
+    addParam($FW_wname, "confirmJSError", 1).
+    addParam($FW_wname, "addHtmlTitle", 1).
+    addParam($FW_wname, "styleData", "").
+    addParam("global",  "language", "EN").
     "data-availableJs='$FW_fhemwebjs' ".
     "data-webName='$FW_wname '";
 }
@@ -1431,10 +1448,13 @@ FW_makeTable($$$@)
 sub
 FW_detailSelect(@)
 {
-  my ($d, $cmd, $list, $param) = @_;
+  my ($d, $cmd, $list, $param, $typeHash) = @_;
   return "" if(!$list || $FW_hiddenroom{input});
-  my %al = map { s/:.*//;$_ => 1 } split(" ", $list);
-  my @al = sort keys %al; # remove duplicate items in list
+  my @al = sort { 
+             my $ta = $typeHash && $typeHash->{$a} ? $typeHash->{$a}.$a : $a;
+             my $tb = $typeHash && $typeHash->{$b} ? $typeHash->{$b}.$b : $b;
+             $ta cmp $tb;
+           } map { s/:.*//; $_ } split(" ", $list);
 
   my $selEl = (defined($al[0]) ? $al[0] : " ");
   $selEl = $1 if($list =~ m/([^ ]*):slider,/); # promote a slider if available
@@ -1451,7 +1471,7 @@ FW_detailSelect(@)
   $ret .= FW_submit("cmd.$cmd$d", $cmd, $cmd.($psc?" psc":""));
   $ret .= "<div class=\"$cmd downText\">&nbsp;$d&nbsp;".
                 ($param ? "&nbsp;$param":"")."</div>";
-  $ret .= FW_select("sel_$cmd$d","arg.$cmd$d",\@al, $selEl, $cmd);
+  $ret .= FW_select("sel_$cmd$d","arg.$cmd$d",\@al,$selEl,$cmd,undef,$typeHash);
   $ret .= FW_textfield("val.$cmd$d", 30, $cmd);
   $ret .= "</form></div>";
   return $ret;
@@ -1535,7 +1555,8 @@ FW_doDetail($)
   FW_makeTable("Internals", $d, $h);
   FW_makeTable("Readings", $d, $h->{READINGS});
 
-  my $attrList = getAllAttr($d);
+  my %attrTypeHash;
+  my $attrList = getAllAttr($d, undef, \%attrTypeHash);
   my $roomList = "multiple,".join(",",
                 sort map { $_ =~ s/ /#/g ;$_} keys %FW_rooms);
   my $groupList = "multiple,".join(",",
@@ -1546,7 +1567,7 @@ FW_doDetail($)
   $attrList = FW_widgetOverride($d, $attrList);
   $attrList =~ s/\\/\\\\/g;
   $attrList =~ s/'/\\'/g;
-  FW_pO FW_detailSelect($d, "attr", $attrList);
+  FW_pO FW_detailSelect($d, "attr", $attrList, undef, \%attrTypeHash);
 
   FW_makeTable("Attributes", $d, $attr{$d}, "deleteattr");
   FW_makeTableFromArray("Probably associated with", "assoc", getPawList($d));
@@ -2144,7 +2165,9 @@ FW_fileList($;$)
   my @ret;
   return @ret if(!opendir(DH, $dir));
   while(my $f = readdir(DH)) {
-    next if($f !~ m,^$re$, || $f eq "99_Utils.pm");
+    next if($f !~ m,^$re$, || $f eq "98_FhemTestUtils.pm" || 
+                              $f eq "99_Utils.pm");
+
     push(@ret, $f);
   }
   closedir(DH);
@@ -2266,18 +2289,31 @@ FW_hidden($$)
 sub
 FW_select($$$$$@)
 {
-  my ($id, $name, $valueArray, $selected, $class, $jSelFn) = @_;
+  my ($id, $name, $valueArray, $selected, $class, $jSelFn, $typeHash) = @_;
   $jSelFn = ($jSelFn ? "onchange=\"$jSelFn\"" : "");
   $id =~ s/\./_/g if($id);      # to avoid problems in JS DOM Search
   $id = ($id ? "id=\"$id\" informId=\"$id\"" : "");
   my $s = "<select $jSelFn $id name=\"$name\" class=\"$class\">";
+  my $oldType="";
+  my %processed;
   foreach my $v (@{$valueArray}) {
+    next if($processed{$v});
+    if($typeHash) {
+      my $newType = $typeHash->{$v};
+      if($newType ne $oldType) {
+        $s .= "</optgroup>" if($oldType);
+        $s .= "<optgroup label='$newType'>" if($newType);
+      }
+      $oldType = $newType;
+    }
     if(defined($selected) && $v eq $selected) {
       $s .= "<option selected=\"selected\" value='$v'>$v</option>\n";
     } else {
       $s .= "<option value='$v'>$v</option>\n";
     }
+    $processed{$v} = 1;
   }
+  $s .= "</optgroup>" if($oldType);
   $s .= "</select>";
   return $s;
 }
@@ -2418,18 +2454,21 @@ FW_style($$)
     FW_pO $end;
 
   } elsif($a[1] eq "select") {
-    my @fl = grep { $_ !~ m/(floorplan|dashboard)/ }
-                        FW_fileList("$FW_cssdir/.*style.css");
+    my %smap= ( ""=>"f11", "touchpad"=>"f11touchpad",
+                "smallscreen"=>"f11smallscreen");
+    my @fl = map { $_ =~ s/style.css//; $smap{$_} ? $smap{$_} : $_ }
+             grep { $_ !~ m/(svg_|floorplan|dashboard)/ }
+             FW_fileList("$FW_cssdir/.*style.css");
     FW_addContent($start);
     FW_pO "<div class='fileList styles'>Styles</div>";
     FW_pO "<table class='block wide fileList'>";
+    my $sp = $FW_sp eq "default" ? "" : $FW_sp;;
+    $sp = $smap{$sp} if($smap{$sp});
     my $row = 0;
-    foreach my $file (@fl) {
-      next if($file =~ m/svg_/);
-      $file =~ s/style.css//;
-      $file = "default" if($file eq "");
+    foreach my $file (sort @fl) {
       FW_pO "<tr class=\"" . ($row?"odd":"even") . "\">";
-      FW_pH "cmd=style set $file", "$file", 1;
+      FW_pH "cmd=style set $file", "$file", 1,
+        "style$file ".($sp eq $file ? "changed":"");
       FW_pO "</tr>";
       $row = ($row+1)%2;
     }
@@ -2673,14 +2712,18 @@ FW_makeImage(@)
       $data =~ s/[\r\n]/ /g;
       $data =~ s/ *$//g;
       $data =~ s/<svg/<svg class="$class" data-txt="$txt"/; #52967
-      $name =~ m/(@.*)$/;
-      my $col;
-      $col = $1 if($1);
-      if($col) {
-        $col =~ s/@//;
-        $col = "#$col" if($col =~ m/^([A-F0-9]{6})$/);
-        $data =~ s/fill="#000000"/fill="$col"/g;
-        $data =~ s/fill:#000000/fill:$col/g;
+      if($name =~ m/@([^:]*)(:(.*))?$/) {
+        my ($fill, $stroke) = ($1, $3);
+        if($fill ne "") {
+          $fill = "#$fill" if($fill =~ m/^([A-F0-9]{6})$/);
+          $data =~ s/fill="#000000"/fill="$fill"/g;
+          $data =~ s/fill:#000000/fill:$fill/g;
+        }
+        if(defined($stroke)) {
+          $stroke = "#$stroke" if($stroke =~ m/^([A-F0-9]{6})$/);
+          $data =~ s/stroke="#000000"/stroke="$stroke"/g;
+          $data =~ s/stroke:#000000/stroke:$stroke/g;
+        }
       } else {
         $data =~ s/fill="#000000"//g;
         $data =~ s/fill:#000000//g;
@@ -3100,13 +3143,7 @@ FW_Notify($$)
     $FW_wname = $ntfy->{SNAME};
     $FW_ME = "/" . AttrVal($FW_wname, "webname", "fhem");
     $FW_subdir = ($h->{iconPath} ? "/floorplan/$h->{iconPath}" : ""); # 47864
-    $FW_sp = AttrVal($FW_wname, "stylesheetPrefix", "f18");
-    $FW_sp = "" if($FW_sp eq "default");
-    $FW_ss = ($FW_sp =~ m/smallscreen/);
-    $FW_tp = ($FW_sp =~ m/smallscreen|touchpad/);
-    my $spDir = ($FW_sp eq "default" ? "" : "$FW_sp:");
-    @FW_iconDirs = grep { $_ } split(":", AttrVal($FW_wname, "iconPath",
-                                "${spDir}fhemSVG:openautomation:default"));
+    FW_setStylesheet();
     if($h->{iconPath}) {
       unshift @FW_iconDirs, $h->{iconPath};
       FW_readIcons($h->{iconPath});
@@ -3755,7 +3792,9 @@ FW_log($$)
         attr lamp devStateIcon .*:noIcon<br>
         </ul>
         Note: if the image is referencing an SVG icon, then you can use the
-        @colorname suffix to color the image. E.g.:<br>
+        @fill:stroke suffix to color the image, where fill replaces the fill
+        color in the SVG (if it is specified as #000000) and the optional
+        stroke the stroke color (if it is specified as #000000). E.g.:<br>
         <ul>
         attr Fax devStateIcon on:control_building_empty@red
                               off:control_building_filled:278727
@@ -4522,8 +4561,11 @@ FW_log($$)
         attr lamp devStateIcon on::A0 off::AI<br>
         attr lamp devStateIcon .*:noIcon<br>
         </ul>
-        Anmerkung: Wenn das Icon ein SVG Bild ist, kann das @colorname Suffix
-        verwendet werden um das Icon einzuf&auml;rben. Z.B.:<br>
+        Anmerkung: Wenn das Icon ein SVG Bild ist, kann das @fill:stroke
+        Suffix verwendet werden um das Icon einzuf&auml;rben, dabei wird in
+        der SVG die F&uuml;llfarbe durch das spezifizierte fill ersetzt, und
+        die Stiftfarbe durch das optionale stroke.
+        Z.B.:<br>
         <ul>
           attr Fax devStateIcon on:control_building_empty@red
           off:control_building_filled:278727

@@ -583,15 +583,15 @@ sub HMinfo_peerCheck(@) { #####################################################
     foreach (grep /^......$/, HMinfo_noDup(map {CUL_HM_name2Id(substr($_,8))} 
                                            grep /^trigDst_/,
                                            keys %{$defs{$eName}{READINGS}})){
-      push @peerIDsTrigUnp,"triggerUnpeered: $eName:\t".$_ 
+      push @peerIDsTrigUnp,"$eName:\t".$_ 
             if(  ($peerIDs &&  $peerIDs !~ m/$_/)
                &&("CCU-FHEM" ne AttrVal(CUL_HM_id2Name($_),"model","")));
-      push @peerIDsTrigUnd,"triggerUndefined: $eName:\t".$_ 
+      push @peerIDsTrigUnd,"$eName:\t".$_ 
             if(!$modules{CUL_HM}{defptr}{$_});
     }
     
     if($peersUsed == 2){#peerList incomplete
-      push @peerIDsFail,"incomplete: $eName:\t".$peerIDs;
+      push @peerIDsFail,"$eName:\t".$peerIDs;
     }
     else{# work on a valid list
       my $id = $defs{$eName}{DEF};
@@ -644,7 +644,7 @@ sub HMinfo_peerCheck(@) { #####################################################
             my $c = $1 eq "04"?"05":"04";
             push @peerIDsNoPeer,"$eName:\t pID:".$pId if ($pId !~ m/$c$/);
             if ($pMd !~ m/HM-CC-RT-DN/ ||$pChn !~ m/(0[45])$/ ){
-              push @peeringStrange,"$eName:\t pID: Model $pMd should be HM-CC-RT-DN ClimatTeam Channel";
+              push @peeringStrange,"$eName:\t pID: Model $pMd should be HM-CC-RT-DN ClimatTeam channel";
             }
             elsif($chn eq "04"){
               # compare templist template are identical and boost is same
@@ -659,7 +659,7 @@ sub HMinfo_peerCheck(@) { #####################################################
           }
           elsif($chn eq "02"){
             if($pChn ne "02" ||$pMd ne "HM-TC-IT-WM-W-EU" ){
-              push @peeringStrange,"$eName:\t pID: Model $pMd should be HM-TC-IT-WM-W-EU Climate Channel";
+              push @peeringStrange,"$eName:\t pID: Model $pMd should be HM-TC-IT-WM-W-EU Climate channel";
             }
           }
         }
@@ -761,7 +761,7 @@ sub HMinfo_paramCheck(@) { ####################################################
           $ioHmId = $defs{$ioCCU}{DEF};
           if ($prefIO){
             my @pIOa = split(",",$prefIO);
-            push @perfIoUndef,"$eName:\t ->$_"  foreach ( grep {!$defs{$_}} @pIOa);
+            push @perfIoUndef,"$eName:\t ->$_"  foreach ( grep {!$defs{$_}} grep !/^none$/,@pIOa);
           }            
         }
       }
@@ -1312,8 +1312,8 @@ sub HMinfo_GetFn($@) {#########################################################
         }
         elsif($_ =~m /^[ ,0-9]{1,5}/){
            my ($cnt,$date) = split(":",$_,2);
-           $_ = sprintf("%-5s>%s",$cnt,$date) if (defined $date);
-           $plSum[$c] +=$cnt;
+           #$_ = sprintf("%-5s>%s",$cnt,$date) if (defined $date);
+           $plSum[$c] +=$cnt if ($cnt =~ m/^\d+$/);
         }
         else{
         }
@@ -1451,10 +1451,12 @@ sub HMinfo_GetFn($@) {#########################################################
   elsif($cmd eq "regCheck")   {##check register--------------------------------
     my @entities = HMinfo_getEntities($opt."v",$filter);
     $ret = $cmd." done:" .HMinfo_regCheck(@entities);
+    $ret = HMinfo_applTxt2Check($ret);
   }
   elsif($cmd eq "peerCheck")  {##check peers-----------------------------------
     my @entities = HMinfo_getEntities($opt,$filter);
     $ret = $cmd." done:" .HMinfo_peerCheck(@entities);
+    $ret = HMinfo_applTxt2Check($ret);
   }
   elsif($cmd eq "configCheck"){##check peers and register----------------------
     if($modules{HMinfo}{helper}{initDone}){
@@ -1737,7 +1739,45 @@ sub HMinfo_GetFn($@) {#########################################################
 #  }                                
 
   elsif($cmd eq "showTimer"){
-    $ret = join("\n",sort map{sprintf("%8d",int($intAt{$_}{TRIGGERTIME}-gettimeofday())).":$intAt{$_}{FN}\t$intAt{$_}{ARG}"} (keys %intAt));
+    my ($type) = (@a,"short");# ugly way to set "full" as default
+    my %show;
+    if($type eq "short"){
+       %show =(   NAME        => 4
+                 ,TIMESPEC    => 3
+                 ,fn          => 1                 
+                 ,FW_detailFn => 4
+                 ,DeviceName  => 4
+                 );
+    }
+    else{
+       %show =(   TYPE        => 1
+                 ,NAME        => 4
+                 ,TIMESPEC    => 3
+                 ,PERIODIC    => 2
+                 ,MODIFIER    => 5
+                 ,STATE       => 9
+                 ,fn          => 1
+                 ,finishFn    => 2
+                 ,abortFn     => 3
+                 ,FW_detailFn => 4
+                 ,DeviceName  => 4
+                 );
+    }
+    my $fltr = "(".join("|",keys %show).')' ;
+    my @ak;
+    foreach my $ats (keys %intAt){
+      push @ak,  substr(localtime($intAt{$_}{TRIGGERTIME}),0,19)
+               .sprintf("%8d: %-30s\t :",int($intAt{$ats}{TRIGGERTIME}-gettimeofday())
+                                        ,$intAt{$ats}{FN})
+               .(ref($intAt{$ats}{ARG}) eq 'HASH' 
+                     ? join("\t ",map{"$_ : ".$intAt{$ats}{ARG}{$_}} 
+                                  map{$_=~m/^\d/?substr($_,1,99):$_}
+                                  sort 
+                                  map{(my $foo = $_) =~ s/$fltr/$show{$1}$1/g; $foo;}
+                                  grep /^$fltr/,
+                                  keys %{$intAt{$ats}{ARG}})
+                      :"$intAt{$ats}{ARG}")};
+    $ret = join("\n",sort @ak);
   }
   elsif($cmd eq "showChilds"){
     my ($type) = @a;
@@ -1790,7 +1830,7 @@ sub HMinfo_GetFn($@) {#########################################################
             ,"templateChk"
             ,"templateUsg"
             ,"templateUsgG:sortTemplate,sortPeer,noTmpl,all"
-            ,"showTimer:noArg"
+            ,"showTimer:short,full"
             ,"showChilds:hm,all"
             );
             
